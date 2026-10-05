@@ -9,7 +9,13 @@ import { noteText } from "./notes";
 
 const DRAFT_KEY = (blockId: string) => `cadence:draft:${blockId}`;
 
-function readDraft(blockId: string): { pro: string; delta: string } | null {
+interface Draft {
+  pro: string;
+  delta: string;
+  done: boolean | null; // did the user fully complete the task? null = not answered yet
+}
+
+function readDraft(blockId: string): Partial<Draft> | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY(blockId));
     return raw ? JSON.parse(raw) : null;
@@ -26,14 +32,18 @@ export function SwitchOverlay() {
 }
 
 function Overlay({ live }: { live: Live }) {
-  const { catName, task, lastNote, pinnedFor, settings, finishBlock } = useStore();
+  const { catName, task, lastNote, pinnedFor, settings, finishBlock, setTaskDone } = useStore();
   const router = useRouter();
   const b = live.block;
-  const [draft, setDraft] = useState(() => {
-    const saved = readDraft(b.id);
-    if (saved) return saved;
+  const t = task(b.task_id);
+  const [draft, setDraft] = useState<Draft>(() => {
     const join = (k: "pro" | "delta") => b.quick_notes.filter((q) => q.kind === k).map((q) => q.text).join(" ");
-    return { pro: join("pro"), delta: join("delta") };
+    const saved = readDraft(b.id);
+    return {
+      pro: saved?.pro ?? join("pro"),
+      delta: saved?.delta ?? join("delta"),
+      done: saved?.done ?? (t?.done_at ? true : null),
+    };
   });
 
   useEffect(() => {
@@ -51,13 +61,16 @@ function Overlay({ live }: { live: Live }) {
   }, []);
 
   const pro = draft.pro.trim(), delta = draft.delta.trim();
-  const blocked = settings.requireNotes && !pro && !delta;
+  const needsNotes = settings.requireNotes && !pro && !delta;
+  const needsDone = Boolean(t) && draft.done === null;
+  const blocked = needsNotes || needsDone;
   const nb = live.next;
   const nextNote = nb ? lastNote(nb.category_id) : null;
-  const title = task(b.task_id)?.title ?? b.task_title;
+  const title = t?.title ?? b.task_title;
 
   const go = () => {
     if (blocked) return;
+    if (t && draft.done !== null && draft.done !== Boolean(t.done_at)) setTaskDone(t.id, draft.done);
     const endedSession = finishBlock(pro, delta);
     try {
       localStorage.removeItem(DRAFT_KEY(b.id));
@@ -80,6 +93,21 @@ function Overlay({ live }: { live: Live }) {
             {title}. Before you switch, write a line or two for next time. Quick notes from this block are already filled in.
           </p>
         </div>
+        {t && (
+          <div className="field" style={{ position: "relative" }}>
+            <label id="done-q">Did you fully complete this task?</label>
+            <div className="seg" role="radiogroup" aria-labelledby="done-q">
+              <label className="seg-opt">
+                <input type="radio" name="task-done" checked={draft.done === true} onChange={() => setDraft((d) => ({ ...d, done: true }))} />
+                Yes, it&apos;s done
+              </label>
+              <label className="seg-opt">
+                <input type="radio" name="task-done" checked={draft.done === false} onChange={() => setDraft((d) => ({ ...d, done: false }))} />
+                Not yet, keep it on my list
+              </label>
+            </div>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: "var(--space-4)", position: "relative" }}>
           <div className="field">
             <label htmlFor="draft-pro">+ Pro: what worked</label>
@@ -116,7 +144,15 @@ function Overlay({ live }: { live: Live }) {
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
-          {blocked && <span style={{ fontSize: 13, opacity: 0.7 }}>Write a pro or a delta to continue.</span>}
+          {blocked && (
+            <span style={{ fontSize: 13, opacity: 0.7 }}>
+              {needsDone && needsNotes
+                ? "Answer whether the task is done and write a pro or a delta to continue."
+                : needsDone
+                  ? "Answer whether the task is done to continue."
+                  : "Write a pro or a delta to continue."}
+            </span>
+          )}
           <button className="btn btn-primary btn-lg" onClick={go} disabled={blocked}>
             {nb ? `Start ${catName(nb.category_id)}` : "Wrap up session"}
             <ArrowRight size={16} />

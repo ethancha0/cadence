@@ -281,6 +281,9 @@ button.check { cursor: pointer; }
 .overlay .input:hover { border-color: color-mix(in srgb, var(--color-bg) 55%, transparent); }
 .overlay .input:focus-visible { border-color: var(--color-accent-300); }
 .overlay .pd-label { color: var(--color-accent-300); }
+.overlay .seg, .overlay .seg-opt + .seg-opt { border-color: color-mix(in srgb, var(--color-bg) 28%, transparent); }
+.overlay .seg-opt:has(input:checked) { color: var(--color-accent-300); box-shadow: inset 0 0 0 1px var(--color-accent-300); }
+.overlay .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-bg) 10%, transparent); }
 .overlay .btn-primary { color: var(--color-accent-300); border-color: var(--color-accent-300); }
 .overlay .btn-primary:not(:disabled):hover { background: color-mix(in srgb, var(--color-accent-300) 12%, transparent); }
 .overlay-next { border-top: 1px solid color-mix(in srgb, var(--color-bg) 20%, transparent); padding-top: var(--space-6); display: flex; flex-direction: column; gap: var(--space-3); }
