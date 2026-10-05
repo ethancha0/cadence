@@ -246,8 +246,11 @@ button.check { cursor: pointer; }
 .split-bar { display: flex; height: 30px; margin-bottom: var(--space-2); border: 1px solid var(--color-accent); border-radius: var(--radius-md); overflow: hidden; }
 .split-seg { min-width: 0; display: flex; align-items: center; padding: 0 var(--space-2); font-size: 11px; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--color-accent); }
 .split-seg:last-child { border-right: 0; }
-.split-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
+.split-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
 .order-num { font-family: var(--font-heading); font-size: 24px; color: var(--color-accent-700); font-feature-settings: "tnum", "lnum"; }
+.split-row.dragging { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.drag-handle { display: flex; align-self: stretch; align-items: center; padding: 0 2px; margin: 0; border: 0; background: none; color: var(--color-accent-700); cursor: grab; touch-action: none; border-radius: var(--radius-sm); }
+.split-row.dragging .drag-handle { cursor: grabbing; }
 .split-title { font-family: var(--font-heading); font-weight: 600; font-size: 18px; line-height: 1.15; }
 .stepper { display: flex; align-items: center; gap: var(--space-1); }
 .mins { min-width: 62px; text-align: center; font-family: var(--font-heading); font-size: 26px; line-height: 1; font-feature-settings: "tnum", "lnum"; }

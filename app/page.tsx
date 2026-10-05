@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowRight, Check, Minus, Plus } from "lucide-react";
+import { ArrowRight, Check, GripVertical, Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PinnedLines, ProDelta } from "@/components/notes";
 import { useNewTask } from "@/components/useNewTask";
 import { byDueThenPriority, dueLabel, dueSoon, fmtMin, isoDate, longDate, pad2, PRIO_CLASS, PRIO_LABEL, shortDate, shortMin } from "@/lib/format";
@@ -12,6 +12,9 @@ import { useStore } from "@/lib/store";
 import type { Task } from "@/lib/types";
 
 const PRESETS = [60, 90, 120, 180];
+
+/** Ids in the user's dragged order first, then any not yet ordered in suggested order. */
+const applyOrder = (ids: string[], order: string[]) => [...order.filter((id) => ids.includes(id)), ...ids.filter((id) => !order.includes(id))];
 
 export default function PlanPage() {
   const store = useStore();
@@ -30,7 +33,7 @@ export default function PlanPage() {
     [data.tasks, cat],
   );
 
-  const split = useMemo(() => {
+  const scored = useMemo(() => {
     const chosen = plan.selected.map((id) => openTasks.find((t) => t.id === id)).filter((t): t is Task => Boolean(t));
     return computeSplit(
       chosen,
@@ -39,6 +42,12 @@ export default function PlanPage() {
       plan.overrides,
     );
   }, [plan.selected, plan.overrides, openTasks, total, lastSession, lastAlloc, daysSinceTouched]);
+
+  const split = useMemo(() => {
+    const byId = new Map(scored.map((s) => [s.task.id, s]));
+    return applyOrder(scored.map((s) => s.task.id), plan.order).map((id) => byId.get(id)!);
+  }, [scored, plan.order]);
+  const reordered = split.some((s, i) => s !== scored[i]);
 
   const planned = split.reduce((a, s) => a + s.minutes, 0);
   const diff = planned - total;
@@ -49,6 +58,26 @@ export default function PlanPage() {
     setPlan((p) => ({ ...p, overrides: {}, selected: p.selected.includes(id) ? p.selected.filter((x) => x !== id) : [...p.selected, id] }));
   const setLength = (m: number) => setPlan((p) => ({ ...p, length: m, overrides: {} }));
   const bump = (id: string, cur: number, d: number) => setPlan((p) => ({ ...p, overrides: { ...p.overrides, [id]: Math.max(5, cur + d) } }));
+
+  // Drag to reorder: pointer events on the grip so it works for mouse and touch; arrow keys for keyboard.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  /** Move `id` to index `to` among the other rows. */
+  const move = (id: string, to: number) =>
+    setPlan((p) => {
+      const cur = applyOrder(scored.map((s) => s.task.id), p.order);
+      const next = cur.filter((x) => x !== id);
+      next.splice(Math.max(0, Math.min(to, next.length)), 0, id);
+      return next.every((x, i) => x === cur[i]) ? p : { ...p, order: next };
+    });
+  const dragTo = (id: string, y: number) => {
+    const others = [...(listRef.current?.querySelectorAll<HTMLElement>(".split-row") ?? [])].filter((r) => r.dataset.id !== id);
+    const to = others.findIndex((r) => {
+      const b = r.getBoundingClientRect();
+      return y < b.top + b.height / 2;
+    });
+    move(id, to < 0 ? others.length : to);
+  };
 
   const begin = async () => {
     if (!split.length || tooShort) return;
@@ -206,8 +235,8 @@ export default function PlanPage() {
           <section>
             <div className="section-head">
               <h6>04 · Suggested split</h6>
-              {Object.keys(plan.overrides).length > 0 && (
-                <button className="btn btn-ghost" onClick={() => setPlan((p) => ({ ...p, overrides: {} }))}>
+              {(Object.keys(plan.overrides).length > 0 || reordered) && (
+                <button className="btn btn-ghost" onClick={() => setPlan((p) => ({ ...p, overrides: {}, order: [] }))}>
                   Reset to suggestion
                 </button>
               )}
@@ -225,28 +254,49 @@ export default function PlanPage() {
                 ))}
               </div>
             )}
-            {split.map((s, i) => (
-              <div key={s.task.id} className="split-row">
-                <span className="order-num">{pad2(i + 1)}</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                  <span className="split-title">{s.task.title}</span>
-                  <span className="xsmall">{catName(s.task.category_id)}</span>
-                  <span className="text-muted xsmall">{s.reason}</span>
-                </div>
-                <div className="stepper">
-                  <button className="btn btn-secondary btn-icon" onClick={() => bump(s.task.id, s.minutes, -5)} aria-label="Less time">
-                    <Minus size={14} />
+            <div ref={listRef}>
+              {split.map((s, i) => (
+                <div key={s.task.id} data-id={s.task.id} className={`split-row${dragging === s.task.id ? " dragging" : ""}`}>
+                  <button
+                    className="drag-handle"
+                    aria-label={`Reorder ${s.task.title}. Use arrow keys to move.`}
+                    onPointerDown={(e) => {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      setDragging(s.task.id);
+                    }}
+                    onPointerMove={(e) => dragging === s.task.id && dragTo(s.task.id, e.clientY)}
+                    onPointerUp={() => setDragging(null)}
+                    onPointerCancel={() => setDragging(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                        e.preventDefault();
+                        move(s.task.id, i + (e.key === "ArrowUp" ? -1 : 1));
+                      }
+                    }}
+                  >
+                    <GripVertical size={16} />
                   </button>
-                  <span className="mins">
-                    {s.minutes}
-                    <small> min</small>
-                  </span>
-                  <button className="btn btn-secondary btn-icon" onClick={() => bump(s.task.id, s.minutes, 5)} aria-label="More time">
-                    <Plus size={14} />
-                  </button>
+                  <span className="order-num">{pad2(i + 1)}</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                    <span className="split-title">{s.task.title}</span>
+                    <span className="xsmall">{catName(s.task.category_id)}</span>
+                    <span className="text-muted xsmall">{s.reason}</span>
+                  </div>
+                  <div className="stepper">
+                    <button className="btn btn-secondary btn-icon" onClick={() => bump(s.task.id, s.minutes, -5)} aria-label="Less time">
+                      <Minus size={14} />
+                    </button>
+                    <span className="mins">
+                      {s.minutes}
+                      <small> min</small>
+                    </span>
+                    <button className="btn btn-secondary btn-icon" onClick={() => bump(s.task.id, s.minutes, 5)} aria-label="More time">
+                      <Plus size={14} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
             <div className="split-foot">
               <span className="small tnum">
                 {split.length ? `${fmtMin(planned)} planned` + (diff ? ` · ${Math.abs(diff)} min ${diff > 0 ? "over" : "under"} your ${fmtMin(total)}` : "") : ""}

@@ -24,6 +24,7 @@ export interface Plan {
   selected: string[];
   length: number | null; // null = default to last session's planned length
   overrides: Record<string, number>;
+  order: string[]; // task ids in user-dragged order; empty = suggested (score) order
 }
 
 /** Seconds worked in a block so far (wall-clock based, survives reloads). */
@@ -37,7 +38,7 @@ function useStoreValue() {
   const [settings, setSettings] = useState<Settings>({ requireNotes: true });
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<Plan>({ selected: [], length: null, overrides: {} });
+  const [plan, setPlan] = useState<Plan>({ selected: [], length: null, overrides: {}, order: [] });
 
   const reload = useCallback(async () => {
     if (!backend) return;
@@ -314,7 +315,7 @@ function useStoreValue() {
   const saveReflection = useCallback(
     (sessionId: string, pro: string, delta: string) => {
       void patch("sessions", sessionId, { pro: pro || null, delta: delta || null });
-      setPlan({ selected: [], length: null, overrides: {} });
+      setPlan({ selected: [], length: null, overrides: {}, order: [] });
     },
     [patch],
   );
