@@ -251,7 +251,7 @@ function useStoreValue() {
       void patch("blocks", b.id, { spent_seconds: spent, resumed_at: null, ended_at: nowIso() });
       if (reason === "timer") {
         chime();
-        notify("Time to put this down.", `${b.task_title} — write a pro or delta before you switch.`);
+        notify("Time to put this down.", `${b.task_title} — write a pro or delta before you switch.`, `cadence-block-end-${b.id}`);
       }
     },
     [live, patch],
