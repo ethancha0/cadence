@@ -1,13 +1,44 @@
 "use client";
 
-import { Check, Plus, X } from "lucide-react";
+import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useNewTask } from "@/components/useNewTask";
 import { byDueThenPriority, dueLabel, dueSoon, isoDate, PRIO_CLASS, PRIO_LABEL } from "@/lib/format";
 import { useStore } from "@/lib/store";
-import type { Category, Priority } from "@/lib/types";
+import type { Category, Priority, Task } from "@/lib/types";
 
 const PRIOS: Priority[] = ["high", "medium", "low"];
+const DAY_MS = 864e5;
+
+function isOlderThanDay(t: Task) {
+  return Date.now() - new Date(t.created_at).getTime() > DAY_MS;
+}
+
+function TaskRow({ task: t, onDone, onDelete }: { task: Task; onDone: (id: string, done: boolean) => void; onDelete: (id: string) => void }) {
+  const done = Boolean(t.done_at);
+  return (
+    <div className="task-row">
+      <button className={`check${done ? " on" : ""}`} onClick={() => onDone(t.id, !done)} aria-label={done ? "Mark not done" : "Mark done"} aria-pressed={done}>
+        {done && <Check size={12} strokeWidth={2.5} />}
+      </button>
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, opacity: done ? 0.5 : 1 }}>
+        <span style={{ fontSize: 14, textDecoration: done ? "line-through" : "none" }}>{t.title}</span>
+        <span className="card-meta" style={{ color: !done && dueSoon(t.due_date) ? "var(--color-accent-700)" : undefined }}>
+          {done ? "Done" : dueLabel(t.due_date)}
+        </span>
+      </div>
+      <span className={`tag ${PRIO_CLASS[t.priority]}`}>{PRIO_LABEL[t.priority]}</span>
+      <button
+        className="btn btn-ghost btn-icon"
+        onClick={() => onDelete(t.id)}
+        aria-label="Delete task"
+        style={{ color: "var(--color-neutral-600)" }}
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
 
 export default function TasksPage() {
   const { ready, data, activeCategories, setTaskDone, deleteTask } = useStore();
@@ -78,37 +109,31 @@ export default function TasksPage() {
           const list = data.tasks
             .filter((t) => t.category_id === c.id)
             .sort((a, b) => Number(Boolean(a.done_at)) - Number(Boolean(b.done_at)) || byDueThenPriority(a, b));
+          const recent = list.filter((t) => !isOlderThanDay(t));
+          const older = list.filter(isOlderThanDay);
           return (
             <section key={c.id}>
               <div className="group-head">
                 <h3>{c.name}</h3>
                 <span className="card-meta tnum">{list.filter((t) => !t.done_at).length} open</span>
               </div>
-              {list.map((t) => {
-                const done = Boolean(t.done_at);
-                return (
-                  <div key={t.id} className="task-row">
-                    <button className={`check${done ? " on" : ""}`} onClick={() => setTaskDone(t.id, !done)} aria-label={done ? "Mark not done" : "Mark done"} aria-pressed={done}>
-                      {done && <Check size={12} strokeWidth={2.5} />}
-                    </button>
-                    <div style={{ display: "flex", flexDirection: "column", minWidth: 0, opacity: done ? 0.5 : 1 }}>
-                      <span style={{ fontSize: 14, textDecoration: done ? "line-through" : "none" }}>{t.title}</span>
-                      <span className="card-meta" style={{ color: !done && dueSoon(t.due_date) ? "var(--color-accent-700)" : undefined }}>
-                        {done ? "Done" : dueLabel(t.due_date)}
-                      </span>
-                    </div>
-                    <span className={`tag ${PRIO_CLASS[t.priority]}`}>{PRIO_LABEL[t.priority]}</span>
-                    <button
-                      className="btn btn-ghost btn-icon"
-                      onClick={() => deleteTask(t.id)}
-                      aria-label="Delete task"
-                      style={{ color: "var(--color-neutral-600)" }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                );
-              })}
+              {recent.map((t) => (
+                <TaskRow key={t.id} task={t} onDone={setTaskDone} onDelete={deleteTask} />
+              ))}
+              {older.length > 0 && (
+                <details className="task-dropdown">
+                  <summary>
+                    <span className="task-dropdown-label">
+                      <ChevronDown size={14} />
+                      Older than a day
+                    </span>
+                    <span className="card-meta tnum">{older.length}</span>
+                  </summary>
+                  {older.map((t) => (
+                    <TaskRow key={t.id} task={t} onDone={setTaskDone} onDelete={deleteTask} />
+                  ))}
+                </details>
+              )}
               {!list.length && (
                 <p className="text-muted small" style={{ padding: "var(--space-2) 0" }}>
                   No tasks yet.
