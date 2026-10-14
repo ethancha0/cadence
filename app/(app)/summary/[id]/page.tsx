@@ -68,7 +68,12 @@ export default function SummaryPage() {
                 <td style={{ fontFamily: "var(--font-heading)", fontWeight: 600, fontSize: 16 }}>{title}</td>
                 <td>{catName(b.category_id)}</td>
                 <td className="num">{b.planned_minutes} min</td>
-                <td className="num">{fmtMin(b.spent_seconds / 60)}</td>
+                <td className="num">
+                  {fmtMin(b.spent_seconds / 60)}
+                  {b.spent_seconds - b.planned_minutes * 60 >= 60 && (
+                    <span className="text-muted xsmall"> (+{fmtMin(b.spent_seconds / 60 - b.planned_minutes)} over)</span>
+                  )}
+                </td>
                 <td style={{ textAlign: "right" }}>{done ? "Done" : "In progress"}</td>
               </tr>
             ))}

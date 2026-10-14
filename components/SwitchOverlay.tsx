@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Pause, Play, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fmtMin, pad2, shortDate } from "@/lib/format";
-import { useStore, type Live } from "@/lib/store";
+import { clock, fmtMin, pad2, shortDate } from "@/lib/format";
+import { useNow, useStore, type Live } from "@/lib/store";
 import { noteText } from "./notes";
 
 const DRAFT_KEY = (blockId: string) => `cadence:draft:${blockId}`;
@@ -13,7 +13,17 @@ interface Draft {
   pro: string;
   delta: string;
   done: boolean | null; // did the user fully complete the task? null = not answered yet
+  sw: Stopwatch;
+  extra: string | null; // minutes to add to time spent, as typed; null = use the stopwatch
 }
+
+/** Wall-clock stopwatch for time worked after the block ended, like a block's spent_seconds/resumed_at. */
+interface Stopwatch {
+  spent: number; // seconds banked while paused
+  since: number | null; // epoch ms the current running stretch began; null = paused
+}
+
+const swSeconds = (sw: Stopwatch, now = Date.now()) => sw.spent + (sw.since ? Math.max(0, (now - sw.since) / 1000) : 0);
 
 function readDraft(blockId: string): Partial<Draft> | null {
   try {
@@ -43,6 +53,9 @@ function Overlay({ live }: { live: Live }) {
       pro: saved?.pro ?? join("pro"),
       delta: saved?.delta ?? join("delta"),
       done: saved?.done ?? (t?.done_at ? true : null),
+      // Timer ran out: the user may not have noticed, so count from the moment it hit 0. Ended early: wait for Start.
+      sw: saved?.sw ?? (b.spent_seconds >= b.planned_minutes * 60 && b.ended_at ? { spent: 0, since: Date.parse(b.ended_at) } : { spent: 0, since: null }),
+      extra: saved?.extra ?? null,
     };
   });
 
@@ -60,6 +73,12 @@ function Overlay({ live }: { live: Live }) {
     };
   }, []);
 
+  const now = useNow(draft.sw.since !== null);
+  const swSec = Math.floor(swSeconds(draft.sw, now));
+  const extraSec = draft.extra === null ? swSec : Math.max(0, Math.round(Number(draft.extra) || 0)) * 60;
+  const toggleSw = () =>
+    setDraft((d) => ({ ...d, sw: d.sw.since ? { spent: swSeconds(d.sw), since: null } : { spent: d.sw.spent, since: Date.now() } }));
+
   const pro = draft.pro.trim(), delta = draft.delta.trim();
   const needsNotes = settings.requireNotes && !pro && !delta;
   const needsDone = Boolean(t) && draft.done === null;
@@ -71,7 +90,8 @@ function Overlay({ live }: { live: Live }) {
   const go = () => {
     if (blocked) return;
     if (t && draft.done !== null && draft.done !== Boolean(t.done_at)) setTaskDone(t.id, draft.done);
-    const endedSession = finishBlock(pro, delta);
+    const extra = draft.extra === null ? swSeconds(draft.sw) : extraSec;
+    const endedSession = finishBlock(pro, delta, extra);
     try {
       localStorage.removeItem(DRAFT_KEY(b.id));
     } catch {}
@@ -92,6 +112,48 @@ function Overlay({ live }: { live: Live }) {
           <p style={{ margin: 0, opacity: 0.75, maxWidth: "56ch" }}>
             {title}. Before you switch, write a line or two for next time. Quick notes from this block are already filled in.
           </p>
+        </div>
+        <div className="overlay-stopwatch">
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <span className="overlay-kicker">{draft.sw.since ? "Stopwatch · since time ran out" : "Stopwatch"}</span>
+            <div className="stopwatch" role="timer" aria-live="off">
+              {clock(swSec)}
+            </div>
+            <div className="btn-row">
+              <button className="btn btn-secondary" onClick={toggleSw}>
+                {draft.sw.since ? <Pause size={14} /> : <Play size={14} />}
+                {draft.sw.since ? "Pause" : swSec > 0 ? "Resume" : "Start"}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setDraft((d) => ({ ...d, sw: { spent: 0, since: null } }))} disabled={swSec === 0 && !draft.sw.since}>
+                <RotateCcw size={14} />
+                Reset
+              </button>
+            </div>
+          </div>
+          <div className="field" style={{ maxWidth: 280 }}>
+            <label htmlFor="extra-min">Extra minutes to add to this block</label>
+            <input
+              id="extra-min"
+              className="input"
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={draft.extra ?? String(Math.round(swSec / 60))}
+              onChange={(e) => setDraft((d) => ({ ...d, extra: e.target.value }))}
+            />
+            <p style={{ margin: "var(--space-2) 0 0", fontSize: 13, opacity: 0.75 }}>
+              {fmtMin(b.spent_seconds / 60)} + {fmtMin(extraSec / 60)} = {fmtMin((b.spent_seconds + extraSec) / 60)} spent
+              {draft.extra !== null && (
+                <>
+                  {" · "}
+                  <button className="btn btn-ghost" style={{ padding: 0, fontSize: 13 }} onClick={() => setDraft((d) => ({ ...d, extra: null }))}>
+                    Use stopwatch
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
         </div>
         {t && (
           <div className="field" style={{ position: "relative" }}>

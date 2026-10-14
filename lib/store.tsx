@@ -248,7 +248,9 @@ function useStoreValue() {
       const b = live.block;
       const planned = b.planned_minutes * 60;
       const spent = reason === "timer" ? planned : Math.min(planned, Math.round(elapsedSeconds(b)));
-      void patch("blocks", b.id, { spent_seconds: spent, resumed_at: null, ended_at: nowIso() });
+      // A timer end is stamped at the moment it hit 0, not when a throttled check noticed, so overtime counts from there.
+      const endedAt = reason === "timer" && b.resumed_at ? new Date(Date.parse(b.resumed_at) + (planned - b.spent_seconds) * 1000).toISOString() : nowIso();
+      void patch("blocks", b.id, { spent_seconds: spent, resumed_at: null, ended_at: endedAt });
       if (reason === "timer") {
         chime();
         notify("Time to put this down.", `${b.task_title} — write a pro or delta before you switch.`, `cadence-block-end-${b.id}`);
@@ -289,11 +291,12 @@ function useStoreValue() {
     [live, patch],
   );
 
-  /** Save the block-end note, then start the next block or end the session. Returns the session id when it ends. */
+  /** Save the block-end note and any extra time worked, then start the next block or end the session. Returns the session id when it ends. */
   const finishBlock = useCallback(
-    (pro: string, delta: string): string | null => {
+    (pro: string, delta: string, extraSeconds = 0): string | null => {
       if (!live || live.phase !== "switch") return null;
       const b = live.block;
+      if (extraSeconds > 0) void patch("blocks", b.id, { spent_seconds: b.spent_seconds + Math.round(extraSeconds) });
       if (pro || delta) {
         const t = derived.task(b.task_id);
         void add("notes", [{

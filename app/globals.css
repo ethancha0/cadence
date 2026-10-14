@@ -286,6 +286,11 @@ button.check { cursor: pointer; }
 .overlay .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-bg) 10%, transparent); }
 .overlay .btn-primary { color: var(--color-accent-300); border-color: var(--color-accent-300); }
 .overlay .btn-primary:not(:disabled):hover { background: color-mix(in srgb, var(--color-accent-300) 12%, transparent); }
+.overlay-stopwatch { position: relative; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) 0; border-block: 1px solid color-mix(in srgb, var(--color-bg) 20%, transparent); }
+.stopwatch { font-family: var(--font-heading); font-weight: 400; font-size: 56px; line-height: 1; font-feature-settings: "tnum", "lnum"; }
+.overlay .btn-secondary { color: var(--color-bg); border-color: color-mix(in srgb, var(--color-bg) 28%, transparent); }
+.overlay .btn-secondary:not(:disabled):hover { background: color-mix(in srgb, var(--color-bg) 10%, transparent); }
+.overlay .btn-ghost { color: var(--color-accent-300); }
 .overlay-next { border-top: 1px solid color-mix(in srgb, var(--color-bg) 20%, transparent); padding-top: var(--space-6); display: flex; flex-direction: column; gap: var(--space-3); }
 
 /* tasks page */
