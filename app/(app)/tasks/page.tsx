@@ -10,8 +10,8 @@ import type { Category, Priority, Task } from "@/lib/types";
 const PRIOS: Priority[] = ["high", "medium", "low"];
 const DAY_MS = 864e5;
 
-function isOlderThanDay(t: Task) {
-  return Date.now() - new Date(t.created_at).getTime() > DAY_MS;
+function isCollapsed(t: Task) {
+  return Boolean(t.done_at) && Date.now() - new Date(t.created_at).getTime() > DAY_MS;
 }
 
 function TaskRow({ task: t, onDone, onDelete }: { task: Task; onDone: (id: string, done: boolean) => void; onDelete: (id: string) => void }) {
@@ -109,8 +109,8 @@ export default function TasksPage() {
           const list = data.tasks
             .filter((t) => t.category_id === c.id)
             .sort((a, b) => Number(Boolean(a.done_at)) - Number(Boolean(b.done_at)) || byDueThenPriority(a, b));
-          const recent = list.filter((t) => !isOlderThanDay(t));
-          const older = list.filter(isOlderThanDay);
+          const recent = list.filter((t) => !isCollapsed(t));
+          const older = list.filter(isCollapsed);
           return (
             <section key={c.id}>
               <div className="group-head">
@@ -125,7 +125,7 @@ export default function TasksPage() {
                   <summary>
                     <span className="task-dropdown-label">
                       <ChevronDown size={14} />
-                      Older than a day
+                      Completed, older than a day
                     </span>
                     <span className="card-meta tnum">{older.length}</span>
                   </summary>
