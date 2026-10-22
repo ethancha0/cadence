@@ -80,6 +80,11 @@ export function longDate(d: Date = new Date()): string {
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
+/** "8:30 PM" */
+export function timeOfDay(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 export function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }

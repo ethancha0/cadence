@@ -80,16 +80,21 @@ class SupabaseBackend implements Backend {
 const DATA_KEY = "cadence:data:v1";
 const SETTINGS_KEY = "cadence:settings:v1";
 
+/** True for a localStorage key that holds demo-mode data, e.g. from a `storage` event sent by another window. */
+export const isLocalDataKey = (key: string | null) => key === DATA_KEY || key === SETTINGS_KEY;
+
 class LocalBackend implements Backend {
   mode = "local" as const;
   private data: Snapshot | null = null;
 
+  // Re-read storage every time: another window (the desktop overlay) may have written since.
+  // The in-memory copy is only a fallback for when localStorage is unavailable.
   private read(): Snapshot {
-    if (this.data) return this.data;
     try {
       const raw = localStorage.getItem(DATA_KEY);
       if (raw) return (this.data = JSON.parse(raw) as Snapshot);
     } catch {}
+    if (this.data) return this.data;
     this.data = seedSnapshot();
     this.write();
     return this.data;
