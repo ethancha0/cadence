@@ -40,7 +40,12 @@ export function elapsedSeconds(b: Block, now = Date.now()): number {
   return b.spent_seconds + (b.resumed_at ? Math.max(0, (now - Date.parse(b.resumed_at)) / 1000) : 0);
 }
 
-function useStoreValue() {
+export interface StoreOptions {
+  /** Re-fetch on this interval (ms) in Supabase mode. Local mode syncs through storage events instead. */
+  poll?: number;
+}
+
+function useStoreValue({ poll }: StoreOptions = {}) {
   const backend = useMemo(() => (typeof window === "undefined" ? null : getBackend()), []);
   const [data, setData] = useState<Snapshot>(EMPTY);
   const [settings, setSettings] = useState<Settings>({ requireNotes: true });
@@ -49,10 +54,15 @@ function useStoreValue() {
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan>({ selected: [], length: null, overrides: {}, order: [] });
 
+  // Writes are optimistic, so a load that overlaps one could hand back rows from before it. Bumped on every write.
+  const writes = useRef({ gen: 0, pending: 0 });
+
   const reload = useCallback(async () => {
     if (!backend) return;
+    const gen = writes.current.gen;
     return Promise.all([backend.load(), backend.loadSettings(), backend.loadDaySettings().catch(() => DEFAULT_DAY_SETTINGS)]).then(
       ([snap, s, day]) => {
+        if (gen !== writes.current.gen || writes.current.pending) return;
         setData(snap);
         setSettings(s);
         setDaySettings(day);
@@ -70,6 +80,35 @@ function useStoreValue() {
     void reload();
   }, [reload]);
 
+  // Other windows and devices change the same data (the desktop overlay, another tab, a phone): pick it up.
+  // Windows of this browser hear about each write straight away through `sync`; others through the backend.
+  const sync = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (!backend) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void reload(), 150); // one reload for a burst of changes
+    };
+    const onVisible = () => document.visibilityState === "visible" && refresh();
+    const channel = new BroadcastChannel("cadence:sync");
+    channel.onmessage = refresh;
+    sync.current = channel;
+    const unsubscribe = backend.subscribe(refresh);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    const iv = poll && backend.mode === "supabase" ? setInterval(onVisible, poll) : undefined;
+    return () => {
+      clearTimeout(timer);
+      clearInterval(iv);
+      channel.close();
+      sync.current = null;
+      unsubscribe();
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [backend, poll, reload]);
+
   // ---------- write-through helpers ----------
 
   const fail = useCallback((e: unknown) => {
@@ -77,28 +116,41 @@ function useStoreValue() {
     setError(`Couldn't save: ${msg}`);
   }, []);
 
+  const track = useCallback(
+    (write: Promise<void>) => {
+      const w = writes.current;
+      w.gen++;
+      w.pending++;
+      return write.catch(fail).finally(() => {
+        w.pending--;
+        sync.current?.postMessage("changed");
+      });
+    },
+    [fail],
+  );
+
   const add = useCallback(
     <K extends Table>(table: K, rows: Snapshot[K]) => {
       setData((d) => ({ ...d, [table]: [...d[table], ...rows] }));
-      return backend!.insert(table, rows).catch(fail);
+      return track(backend!.insert(table, rows));
     },
-    [backend, fail],
+    [backend, track],
   );
 
   const patch = useCallback(
     <K extends Table>(table: K, id: string, p: Partial<Snapshot[K][number]>) => {
       setData((d) => ({ ...d, [table]: (d[table] as { id: string }[]).map((r) => (r.id === id ? { ...r, ...p } : r)) }));
-      return backend!.update(table, id, p).catch(fail);
+      return track(backend!.update(table, id, p));
     },
-    [backend, fail],
+    [backend, track],
   );
 
   const drop = useCallback(
     (table: Table, id: string) => {
       setData((d) => ({ ...d, [table]: (d[table] as { id: string }[]).filter((r) => r.id !== id) }));
-      return backend!.remove(table, id).catch(fail);
+      return track(backend!.remove(table, id));
     },
-    [backend, fail],
+    [backend, track],
   );
 
   // ---------- derived ----------
@@ -235,18 +287,13 @@ function useStoreValue() {
         started_at: i === 0 ? ts : null, resumed_at: i === 0 ? ts : null, ended_at: null, quick_notes: [],
       }));
       setData((d) => ({ ...d, sessions: [...d.sessions, session], blocks: [...d.blocks, ...blocks] }));
-      try {
-        await backend!.insert("sessions", [session]);
-        await backend!.insert("blocks", blocks);
-      } catch (e) {
-        fail(e);
-      }
+      await track(backend!.insert("sessions", [session]).then(() => backend!.insert("blocks", blocks)));
       if (plannedId) {
         const items = split.map((s) => ({ task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, minutes: s.minutes, suggested: s.suggested }));
         void patch("planned", plannedId, { status: "started", session_id: session.id, plan: items });
       }
     },
-    [backend, fail, live, patch, plan.plannedId],
+    [backend, live, patch, plan.plannedId, track],
   );
 
   const pause = useCallback(() => {
@@ -278,23 +325,39 @@ function useStoreValue() {
 
   // Hard stop: schedule the block end at the wall-clock moment the timer reaches 0.
   const endRef = useRef(endBlock);
+  const reloadRef = useRef(reload);
   useEffect(() => {
     endRef.current = endBlock;
-  }, [endBlock]);
+    reloadRef.current = reload;
+  }, [endBlock, reload]);
+  const verifiedRef = useRef("");
   const runningBlock = live && live.phase === "run" && live.block.resumed_at ? live.block : null;
   useEffect(() => {
     if (!runningBlock) return;
     const remainingMs = () => (runningBlock.planned_minutes * 60 - elapsedSeconds(runningBlock)) * 1000;
     let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
     const check = () => {
+      if (cancelled) return;
       clearTimeout(timer);
       const ms = remainingMs();
-      if (ms <= 0) endRef.current("timer");
-      else timer = setTimeout(check, Math.min(ms, 30_000)); // re-check; background tabs throttle timers
+      if (ms > 0) {
+        timer = setTimeout(check, Math.min(ms, 30_000)); // re-check; background tabs throttle timers
+        return;
+      }
+      // Another window may have paused or ended this block since we loaded it, so refresh once before stopping it.
+      // A changed block re-runs this effect (cancelling this one); an unchanged one is ended on the next check.
+      const sig = `${runningBlock.id}:${runningBlock.resumed_at}:${runningBlock.spent_seconds}`;
+      if (verifiedRef.current === sig) endRef.current("timer");
+      else {
+        verifiedRef.current = sig;
+        void reloadRef.current().finally(check);
+      }
     };
     check();
     document.addEventListener("visibilitychange", check);
     return () => {
+      cancelled = true;
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", check);
     };
@@ -430,8 +493,8 @@ function useStoreValue() {
 export type Store = ReturnType<typeof useStoreValue>;
 const StoreContext = createContext<Store | null>(null);
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const value = useStoreValue();
+export function StoreProvider({ children, poll }: { children: ReactNode } & StoreOptions) {
+  const value = useStoreValue({ poll });
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 

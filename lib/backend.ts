@@ -17,6 +17,8 @@ export interface Backend {
   saveSettings(s: Settings): Promise<void>;
   loadDaySettings(): Promise<DaySettings>;
   saveDaySettings(s: DaySettings): Promise<void>;
+  /** Calls `onChange` when the data changes somewhere else (another device, tab or window). Returns an unsubscribe. */
+  subscribe(onChange: () => void): () => void;
 }
 
 const DEFAULT_SETTINGS: Settings = { requireNotes: true };
@@ -100,6 +102,14 @@ class SupabaseBackend implements Backend {
     const { error } = await this.sb.from("day_settings").upsert({ user_id: auth.user.id, ...s, updated_at: new Date().toISOString() });
     if (error) throw error;
   }
+
+  // Needs the tables in the supabase_realtime publication (see the end of supabase/schema.sql).
+  subscribe(onChange: () => void) {
+    const channel = this.sb.channel("cadence-changes");
+    for (const table of Object.values(TABLE)) channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
+    channel.subscribe();
+    return () => void this.sb.removeChannel(channel);
+  }
 }
 
 // ---------- localStorage ----------
@@ -112,8 +122,9 @@ class LocalBackend implements Backend {
   mode = "local" as const;
   private data: Snapshot | null = null;
 
+  // Re-read storage every time: another window (the desktop overlay) may have written since.
+  // The in-memory copy is only a fallback for when localStorage is unavailable.
   private read(): Snapshot {
-    if (this.data) return this.data;
     try {
       const raw = localStorage.getItem(DATA_KEY);
       if (raw) {
@@ -122,6 +133,7 @@ class LocalBackend implements Backend {
         return (this.data = d);
       }
     } catch {}
+    if (this.data) return this.data;
     this.data = seedSnapshot();
     this.write();
     return this.data;
@@ -188,6 +200,11 @@ class LocalBackend implements Backend {
     try {
       localStorage.setItem(DAY_KEY, JSON.stringify(s));
     } catch {}
+  }
+
+  // Demo data lives in this browser only; other windows of it hear about writes from the store directly.
+  subscribe() {
+    return () => {};
   }
 
   /** Demo mode only: wipe and re-seed. */

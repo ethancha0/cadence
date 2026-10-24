@@ -1,0 +1,33 @@
+{
+  "name": "cadence-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cadence's always-on-top desktop overlay.",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "app.cadence.desktop",
+    "productName": "Cadence",
+    "files": [
+      "main.js",
+      "preload.cjs"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dir",
+      "identity": "-",
+      "hardenedRuntime": false
+    }
+  }
+}

@@ -53,3 +53,12 @@ begin
     end if;
   end loop;
 end $$;
+
+-- Live updates across windows (the overlay, another tab), like the tables in schema.sql.
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                 where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'planned_sessions') then
+    alter publication supabase_realtime add table public.planned_sessions;
+  end if;
+end $$;

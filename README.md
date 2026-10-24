@@ -45,11 +45,31 @@ Import the repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLIS
 | `app/(app)/week/page.tsx` | The Week page: calendar events in colour, translucent timeblocks you drag on, move and resize. Each timeblock is a `planned_sessions` row; **Plan & start** fills the Plan page from it. |
 | `app/api/calendar/route.ts`, `lib/ical.ts` | Reads the user's iCal feeds server-side and expands recurring events for the requested range. |
 | `proxy.ts` | Next 16's middleware: refreshes the Supabase session and redirects signed-out visitors to `/login`. |
+| `components/DesktopOverlay.tsx` | The desktop overlay at `/overlay`: current block, session, last note and tasks in one small panel. |
+| `desktop/` | The Electron shell that pins `/overlay` to the top-right of your screen. |
 
 - **Timer** is wall-clock based (`session_blocks.resumed_at` + `spent_seconds`), so it survives tab sleep and reloads. Reopening the app mid-session resumes the current block.
 - **Quick notes** are saved on the block (`quick_notes`) and prefill the hard-stop form. Hard-stop drafts are kept in localStorage until submitted.
 - **Block end** plays a chime and shows a system notification if you allowed notifications (you're asked when you begin a session). Phone push notifications aren't implemented.
 - **Require a note at hard stop** is a setting (Settings → Hard stop), on by default.
+
+## Desktop overlay (macOS)
+
+A small panel that floats over your other apps in the top-right corner of the screen. It shows the running block and timer, the session ribbon, your last note for the category, and your tasks. It stays faint until you hover it, clicks pass through it until then, and it turns solid with the hard-stop prompt when a block ends.
+
+```bash
+npm run dev               # the app must be running; the overlay loads it
+cd desktop && npm install # first time only
+npm start                 # or `npm run desktop` from the repo root
+```
+
+To install it as an app instead, run `npm run desktop:build` on your Mac (after `cd desktop && npm install`), then drag `desktop/dist/mac-arm64/Cadence.app` (or `dist/mac/` on an Intel Mac) into Applications. The packaged app loads production (`PRODUCTION_URL` in `desktop/main.js`), so no local server is needed. Add it under **System Settings → General → Login Items** to start it when you log in.
+
+- **Signing:** the build signs ad hoc, which needs no Apple Developer account and runs on the Mac that built it. If macOS blocks a copy from another Mac, open it once, then choose **Open Anyway** in **System Settings → Privacy & Security**.
+- **⌥⌘K** shows and hides the overlay. **Open Cadence** in its footer opens the full app in a window of its own. That window shares the overlay's sign-in and demo data, so use it rather than your browser in demo mode.
+- **Settings** come from environment variables: `CADENCE_URL` (default `http://localhost:3000` with `npm start`, production in the packaged app), `CADENCE_OVERLAY_TONE` (`dark` or `light`), `CADENCE_OVERLAY_OPACITY` (0.5–0.95 when hovered, default 0.72) and `CADENCE_OVERLAY_REST` (0.1–0.6 at rest, default 0.3).
+- **Sync:** a change shows up in every open window within a moment. Windows of the same app or browser tell each other after every save. Other devices come through Supabase Realtime, which needs the tables in the `supabase_realtime` publication: the last block of `supabase/schema.sql`. The overlay also re-checks every 15 seconds and on focus. Before a block's hard stop fires, the app re-checks that no other window paused or ended it.
+- `/overlay` also works in an ordinary browser tab, without the always-on-top window.
 
 ## Not built yet: Phase 2, the Claude connector
 

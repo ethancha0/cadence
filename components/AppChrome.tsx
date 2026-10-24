@@ -13,6 +13,8 @@ const AUTH_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password"];
 export function AppChrome({ children }: { children: ReactNode }) {
   const path = usePathname();
   if (AUTH_PATHS.includes(path)) return children;
+  // The desktop overlay is its own small window: no nav, and it shows the hard stop itself.
+  if (path === "/overlay") return <StoreProvider poll={15_000}>{children}</StoreProvider>;
   return (
     <StoreProvider>
       <Nav />

@@ -95,3 +95,16 @@ select c.id as category_id, c.user_id, c.name,
   coalesce((select sum(b.spent_seconds) from session_blocks b
             where b.category_id = c.id and b.started_at >= date_trunc('week', now())), 0) / 60 as minutes_this_week
 from categories c;
+
+-- Realtime: open windows (the desktop overlay, other tabs and devices) hear about changes as they happen.
+-- Adds only the tables not already in the publication, so it's safe to run again.
+do $$
+declare t text;
+begin
+  foreach t in array array['categories','tasks','sessions','session_blocks','notes'] loop
+    if not exists (select 1 from pg_publication_tables
+                   where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
