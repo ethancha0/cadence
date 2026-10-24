@@ -206,7 +206,7 @@ function Running({ live, onCollapse }: { live: Live; onCollapse: () => void }) {
         </section>
       )}
 
-      <TaskList limit={4} />
+      <TaskList rows={4.5} />
     </>
   );
 }
@@ -376,7 +376,7 @@ function Idle() {
         <span className="ov-title">Cadence</span>
         <span className="ov-muted xsmall">No session running. {last}</span>
       </div>
-      <TaskList limit={6} />
+      <TaskList rows={6.5} />
       <div className="ov-pad">
         <button className="ov-primary" onClick={() => openApp("/")}>
           Plan a session
@@ -386,8 +386,13 @@ function Idle() {
   );
 }
 
-/** Session tasks first (in block order), then the rest by due date. Tasks finished today stay, struck through. */
-function TaskList({ limit }: { limit: number }) {
+const TASK_ROW_PX = 48;
+
+/**
+ * Session tasks first (in block order), then the rest by due date. Tasks finished today stay, struck through.
+ * Shows about `rows` rows and scrolls the rest; a half row hints that there's more.
+ */
+function TaskList({ rows }: { rows: number }) {
   const { data, live, cat, catName, setTaskDone } = useStore();
   const [open, setOpen] = useState(true);
 
@@ -400,9 +405,8 @@ function TaskList({ limit }: { limit: number }) {
         const c = cat(t.category_id);
         return c && !c.archived && (!t.done_at || isoDate(new Date(t.done_at)) === today);
       })
-      .sort((a, b) => rank(a) - rank(b) || byDueThenPriority(a, b))
-      .slice(0, limit);
-  }, [data.tasks, live, cat, limit]);
+      .sort((a, b) => rank(a) - rank(b) || byDueThenPriority(a, b));
+  }, [data.tasks, live, cat]);
 
   const nowId = live?.phase === "run" ? live.block.task_id : null;
   const nextId = live?.next?.task_id ?? null;
@@ -417,7 +421,7 @@ function TaskList({ limit }: { limit: number }) {
         </span>
       </button>
       {open && (
-        <div className="ov-tasks">
+        <div className="ov-tasks" style={{ maxHeight: rows * TASK_ROW_PX }}>
           {!tasks.length && <p className="ov-pad ov-muted xsmall">No open tasks.</p>}
           {tasks.map((t) => {
             const badge = t.done_at ? null : t.id === nowId ? "Now" : t.id === nextId ? "Next" : null;
