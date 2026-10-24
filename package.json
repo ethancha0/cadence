@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "desktop": "npm --prefix desktop start",
+    "desktop:build": "npm --prefix desktop run build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
