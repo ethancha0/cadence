@@ -14,6 +14,8 @@ export interface Backend {
   remove(table: Table, id: string): Promise<void>;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
+  /** Calls `onChange` when the data changes somewhere else (another device, tab or window). Returns an unsubscribe. */
+  subscribe(onChange: () => void): () => void;
 }
 
 const DEFAULT_SETTINGS: Settings = { requireNotes: true };
@@ -73,15 +75,20 @@ class SupabaseBackend implements Backend {
     const { error } = await this.sb.auth.updateUser({ data: { require_notes: s.requireNotes } });
     if (error) throw error;
   }
+
+  // Needs the tables in the supabase_realtime publication (see the end of supabase/schema.sql).
+  subscribe(onChange: () => void) {
+    const channel = this.sb.channel("cadence-changes");
+    for (const table of Object.values(TABLE)) channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
+    channel.subscribe();
+    return () => void this.sb.removeChannel(channel);
+  }
 }
 
 // ---------- localStorage ----------
 
 const DATA_KEY = "cadence:data:v1";
 const SETTINGS_KEY = "cadence:settings:v1";
-
-/** True for a localStorage key that holds demo-mode data, e.g. from a `storage` event sent by another window. */
-export const isLocalDataKey = (key: string | null) => key === DATA_KEY || key === SETTINGS_KEY;
 
 class LocalBackend implements Backend {
   mode = "local" as const;
@@ -147,6 +154,11 @@ class LocalBackend implements Backend {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {}
+  }
+
+  // Demo data lives in this browser only; other windows of it hear about writes from the store directly.
+  subscribe() {
+    return () => {};
   }
 
   /** Demo mode only: wipe and re-seed. */

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { chime, notify, primeAlerts } from "./alerts";
-import { getBackend, isLocalDataKey } from "./backend";
+import { getBackend } from "./backend";
 import { daysSince, startOfWeek } from "./format";
 import type { SplitItem } from "./split";
 import type { Block, Category, Note, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
@@ -70,20 +70,32 @@ function useStoreValue({ poll }: StoreOptions = {}) {
     void reload();
   }, [reload]);
 
-  // Another window (the desktop overlay, a second tab) may change the same data: pick it up.
+  // Other windows and devices change the same data (the desktop overlay, another tab, a phone): pick it up.
+  // Windows of this browser hear about each write straight away through `sync`; others through the backend.
+  const sync = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
     if (!backend) return;
-    const onVisible = () => document.visibilityState === "visible" && void reload();
-    const onStorage = (e: StorageEvent) => isLocalDataKey(e.key) && void reload();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void reload(), 150); // one reload for a burst of changes
+    };
+    const onVisible = () => document.visibilityState === "visible" && refresh();
+    const channel = new BroadcastChannel("cadence:sync");
+    channel.onmessage = refresh;
+    sync.current = channel;
+    const unsubscribe = backend.subscribe(refresh);
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("storage", onStorage);
     const iv = poll && backend.mode === "supabase" ? setInterval(onVisible, poll) : undefined;
     return () => {
+      clearTimeout(timer);
+      clearInterval(iv);
+      channel.close();
+      sync.current = null;
+      unsubscribe();
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("storage", onStorage);
-      clearInterval(iv);
     };
   }, [backend, poll, reload]);
 
@@ -99,7 +111,10 @@ function useStoreValue({ poll }: StoreOptions = {}) {
       const w = writes.current;
       w.gen++;
       w.pending++;
-      return write.catch(fail).finally(() => w.pending--);
+      return write.catch(fail).finally(() => {
+        w.pending--;
+        sync.current?.postMessage("changed");
+      });
     },
     [fail],
   );
