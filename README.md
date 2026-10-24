@@ -1,6 +1,7 @@
 # Cadence
 
-<img width="1162" height="810" alt="image" src="https://github.com/user-attachments/assets/1a2bb6cc-b044-48ce-9721-8fe18635fb79" />
+<img width="1078" height="925" alt="image" src="https://github.com/user-attachments/assets/af6e8fbe-4f86-475c-82f5-1954a73ad676" />
+
 
 
 Spread one work session across several commitments instead of sinking it all into the first task. Pick tasks, set a length, read your notes from last time, take the suggested split, and work in timed blocks with a hard stop. Each hard stop asks for a pro or delta, and those notes come back the next time you pick a task from that category.
