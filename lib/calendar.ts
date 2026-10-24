@@ -1,78 +1,41 @@
-"use client";
+// Calendar feeds: colours, URL rules and defaults. Pure, so the API route and the client share it.
+import type { CalColor, DaySettings } from "./types";
 
-// The day rail's calendar: /api/calendar (or the seeded demo day), kept in memory per date
-// and refetched on window focus once it's more than 5 minutes old.
-import { useCallback, useEffect, useState } from "react";
-import { dayBounds } from "./day";
-import { isoDate } from "./format";
-import { seedCalendar } from "./seed";
-import type { CalendarStatus, CalEvent, DaySettings } from "./types";
+/** In picker order. Each maps to --cal-<name>-bg / -fg / -sw in globals.css. */
+export const CAL_COLORS: CalColor[] = ["slate", "teal", "sage", "plum", "clay", "indigo", "rose", "stone"];
 
-const STALE_MS = 5 * 6e4;
+export const CAL_COLOR_LABEL: Record<CalColor, string> = {
+  slate: "Slate", teal: "Teal", sage: "Sage", plum: "Plum", clay: "Clay", indigo: "Indigo", rose: "Rose", stone: "Stone",
+};
 
-export interface CalendarData {
-  events: CalEvent[];
-  calendars: CalendarStatus[];
-  fetchedAt: number;
-}
+export const DEFAULT_DAY_SETTINGS: DaySettings = { timezone: "UTC", day_start: "09:00", wind_down: "23:00", calendars: [] };
 
-const cache = new Map<string, CalendarData>();
-const inflight = new Map<string, Promise<CalendarData>>(); // one request per key, even when effects run twice
-let latest: CalendarData | null = null;
-
-/** The most recent fetch, for Settings' per-calendar event counts. */
-export const lastCalendarFetch = () => latest;
-
-async function fetchCalendar(mode: "local" | "supabase", ds: DaySettings, from: string, to: string): Promise<CalendarData> {
-  if (mode === "local") {
-    return { events: seedCalendar(new Date(from)), calendars: [{ name: "Classes", ok: true }, { name: "Personal", ok: true }], fetchedAt: Date.now() };
+/**
+ * Only Google Calendar's secret iCal addresses are fetched. The server fetches whatever URL is saved,
+ * so this is also the guard against pointing it at anything else.
+ */
+export function isGoogleIcalUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === "https:" && u.hostname === "calendar.google.com" && u.pathname.startsWith("/calendar/ical/") && u.pathname.endsWith(".ics");
+  } catch {
+    return false;
   }
-  if (!ds.calendars.length) return { events: [], calendars: [], fetchedAt: Date.now() };
-  const res = await fetch(`/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(res.status === 401 ? "You're signed out. Reload to sign in again." : `Calendar request failed (${res.status})`);
-  const body = (await res.json()) as Omit<CalendarData, "fetchedAt">;
-  return { ...body, fetchedAt: Date.now() };
 }
 
-export function useCalendar(date: Date, ds: DaySettings, mode: "local" | "supabase") {
-  const { start, end } = dayBounds(date, ds.day_start, ds.wind_down);
-  const from = start.toISOString(), to = end.toISOString();
-  const key = `${mode}|${from}|${to}|${ds.calendars.map((c) => c.url).join(",")}`;
-  const day = isoDate(date);
-  const [, setVersion] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+/** "https://calendar.google.com/calendar/ical/…/private-••••/basic.ics" */
+export function maskIcalUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const file = u.pathname.split("/").pop();
+    return `${u.hostname}/…/private-••••••/${file}`;
+  } catch {
+    return "Invalid address";
+  }
+}
 
-  const load = useCallback(
-    () =>
-      (inflight.get(key) ?? inflight.set(key, fetchCalendar(mode, ds, from, to).finally(() => inflight.delete(key))).get(key)!).then(
-        (data) => {
-          cache.set(key, data);
-          latest = data;
-          setError(null);
-          setVersion((v) => v + 1);
-        },
-        (e) => setError(e instanceof Error ? e.message : String(e)),
-      ),
-    // `ds.calendars` (all fetchCalendar reads of ds) is folded into `key`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key],
-  );
-
-  useEffect(() => {
-    const fresh = () => {
-      const c = cache.get(key);
-      return c && Date.now() - c.fetchedAt < STALE_MS;
-    };
-    if (!fresh()) void load();
-    const onFocus = () => {
-      if (!fresh()) void load();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [key, load]);
-
-  const data = cache.get(key) ?? null;
-  // All-day events come back with a day's slack; keep the ones covering this date.
-  const events = (data?.events ?? []).filter((e) => !e.allDay || (e.start <= day && (e.end > day || e.end === e.start)));
-  return { events, calendars: data?.calendars ?? [], fetchedAt: data?.fetchedAt ?? null, loading: !data && !error, error, refresh: load };
+/** "HH:MM" or "HH:MM:SS" → hours as a number (9.5 for 09:30). */
+export function timeToHours(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return (h || 0) + (m || 0) / 60;
 }

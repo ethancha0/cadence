@@ -19,6 +19,7 @@ const applyOrder = (ids: string[], order: string[]) => [...order.filter((id) => 
 export default function PlanPage() {
   const store = useStore();
   const { ready, live, data, plan, setPlan, lastSession, lastAlloc, catName, cat, lastNote, pinnedFor, daysSinceTouched, beginSession } = store;
+  const fromBlock = plan.plannedId ? store.planned.find((p) => p.id === plan.plannedId) ?? null : null;
   const router = useRouter();
   const nt = useNewTask();
 
@@ -101,6 +102,18 @@ export default function PlanPage() {
           Choose your tasks and how long you have. Cadence brings back your notes for each category and suggests how to split the time.
         </p>
       </header>
+
+      {fromBlock && (
+        <div className="banner from-week" style={{ margin: "0 0 var(--space-6)" }}>
+          <span>
+            From your week: <strong>{fromBlock.category_id ? catName(fromBlock.category_id) : "timeblock"}</strong> block, hard stop at{" "}
+            {new Date(fromBlock.ends_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. Tasks and length are filled in; change anything.
+          </span>
+          <button className="btn btn-ghost" onClick={() => setPlan((p) => ({ ...p, plannedId: undefined }))}>
+            Unlink
+          </button>
+        </div>
+      )}
 
       <div className="grid-cols">
         <div className="stack">

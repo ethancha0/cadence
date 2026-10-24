@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CalendarSettings } from "@/components/CalendarSettings";
 import { chime, notifyPermission, requestNotifyPermission, testNotify, type NotifyPermission, type TestResult } from "@/lib/alerts";
 import { resetLocalDemo } from "@/lib/backend";
 import { useStore } from "@/lib/store";
@@ -56,6 +57,8 @@ export default function SettingsPage() {
             </label>
           </div>
         </section>
+
+        <CalendarSettings />
 
         <section>
           <h6>Notifications</h6>

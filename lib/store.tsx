@@ -3,11 +3,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { chime, notify, primeAlerts } from "./alerts";
 import { getBackend } from "./backend";
-import { daysSince, startOfWeek } from "./format";
-import type { SplitItem } from "./split";
-import type { Block, Category, Note, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
+import { DEFAULT_DAY_SETTINGS } from "./calendar";
+import { byDueThenPriority, daysSince, startOfWeek } from "./format";
+import { computeSplit, type SplitItem } from "./split";
+import type { Block, Category, DaySettings, Note, PlannedSession, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
 
-const EMPTY: Snapshot = { categories: [], tasks: [], notes: [], sessions: [], blocks: [] };
+const EMPTY: Snapshot = { categories: [], tasks: [], notes: [], sessions: [], blocks: [], planned: [] };
 const uid = () => crypto.randomUUID();
 const nowIso = () => new Date().toISOString();
 
@@ -25,6 +26,13 @@ export interface Plan {
   length: number | null; // null = default to last session's planned length
   overrides: Record<string, number>;
   order: string[]; // task ids in user-dragged order; empty = suggested (score) order
+  plannedId?: string; // set when the plan was opened from a Week timeblock; begin links the session to it
+}
+
+/** Minutes a timeblock still has before its hard stop, floored to 5 (its full length if it hasn't started). */
+export function minutesLeft(p: Pick<PlannedSession, "starts_at" | "ends_at">, now = Date.now()): number {
+  const from = Math.max(now, Date.parse(p.starts_at));
+  return Math.max(0, Math.floor((Date.parse(p.ends_at) - from) / 6e4 / 5) * 5);
 }
 
 /** Seconds worked in a block so far (wall-clock based, survives reloads). */
@@ -41,6 +49,7 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   const backend = useMemo(() => (typeof window === "undefined" ? null : getBackend()), []);
   const [data, setData] = useState<Snapshot>(EMPTY);
   const [settings, setSettings] = useState<Settings>({ requireNotes: true });
+  const [daySettings, setDaySettings] = useState<DaySettings>(DEFAULT_DAY_SETTINGS);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan>({ selected: [], length: null, overrides: {}, order: [] });
@@ -51,11 +60,12 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   const reload = useCallback(async () => {
     if (!backend) return;
     const gen = writes.current.gen;
-    return Promise.all([backend.load(), backend.loadSettings()]).then(
-      ([snap, s]) => {
+    return Promise.all([backend.load(), backend.loadSettings(), backend.loadDaySettings().catch(() => DEFAULT_DAY_SETTINGS)]).then(
+      ([snap, s, day]) => {
         if (gen !== writes.current.gen || writes.current.pending) return;
         setData(snap);
         setSettings(s);
+        setDaySettings(day);
         setError(null);
         setReady(true);
       },
@@ -161,6 +171,7 @@ function useStoreValue({ poll }: StoreOptions = {}) {
     }
     blocksBySession.forEach((l) => l.sort((a, b) => a.position - b.position));
     const notes = [...data.notes].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const planned = [...data.planned].sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 
     const lastTouched = new Map<string, string>();
     const weekStart = startOfWeek().getTime();
@@ -199,6 +210,7 @@ function useStoreValue({ poll }: StoreOptions = {}) {
       endedSessions,
       lastSession,
       notes,
+      planned,
       live,
       cat: (id: string): Category | undefined => catById.get(id),
       catName: (id: string) => catById.get(id)?.name ?? "Unknown category",
@@ -262,11 +274,17 @@ function useStoreValue({ poll }: StoreOptions = {}) {
 
   // ---------- live session ----------
 
+  /**
+   * `planned` links the session to that planned row (otherwise to the Week block the plan came from), and
+   * `startedAt` backdates it, for a session caught up from a reminder. Resolves to an error message, or null.
+   */
   const beginSession = useCallback(
-    async (split: SplitItem<Task>[]) => {
-      if (!split.length || live) return;
+    async (split: SplitItem<Task>[], opts: { planned?: PlannedSession; startedAt?: string } = {}): Promise<string | null> => {
+      if (live) return "Another session is running.";
+      if (!split.length) return "Nothing to start: this category has no open tasks.";
       primeAlerts();
-      const ts = nowIso();
+      const plannedId = opts.planned?.id ?? plan.plannedId;
+      const ts = opts.startedAt ?? nowIso();
       const session: Session = { id: uid(), planned_minutes: split.reduce((a, s) => a + s.minutes, 0), started_at: ts, ended_at: null, pro: null, delta: null };
       const blocks: Block[] = split.map((s, i) => ({
         id: uid(), session_id: session.id, task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, position: i,
@@ -275,8 +293,13 @@ function useStoreValue({ poll }: StoreOptions = {}) {
       }));
       setData((d) => ({ ...d, sessions: [...d.sessions, session], blocks: [...d.blocks, ...blocks] }));
       await track(backend!.insert("sessions", [session]).then(() => backend!.insert("blocks", blocks)));
+      if (plannedId) {
+        const items = split.map((s) => ({ task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, minutes: s.minutes, suggested: s.suggested }));
+        void patch("planned", plannedId, { status: opts.startedAt ? "caught_up" : "started", session_id: session.id, plan: items });
+      }
+      return null;
     },
-    [backend, live, track],
+    [backend, live, patch, plan.plannedId, track],
   );
 
   const pause = useCallback(() => {
@@ -381,7 +404,7 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   const saveReflection = useCallback(
     (sessionId: string, pro: string, delta: string) => {
       void patch("sessions", sessionId, { pro: pro || null, delta: delta || null });
-      setPlan({ selected: [], length: null, overrides: {}, order: [] });
+      setPlan({ selected: [], length: null, overrides: {}, order: [] }); // also drops plannedId
     },
     [patch],
   );
@@ -402,6 +425,66 @@ function useStoreValue({ poll }: StoreOptions = {}) {
       backend?.saveSettings(s).catch(fail);
     },
     [backend, fail],
+  );
+
+  const updateDaySettings = useCallback(
+    (s: DaySettings) => {
+      const next = { ...s, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || s.timezone };
+      setDaySettings(next);
+      return backend?.saveDaySettings(next).catch(fail);
+    },
+    [backend, fail],
+  );
+
+  // ---------- week timeblocks ----------
+
+  const addPlanned = useCallback(
+    (input: Pick<PlannedSession, "category_id" | "starts_at" | "ends_at"> & Partial<PlannedSession>) => {
+      const p: PlannedSession = {
+        id: uid(), label: "", until_label: "", plan: [], status: "planned", session_id: null, skip_reason: null, created_at: nowIso(), ...input,
+      };
+      void add("planned", [p]);
+      return p;
+    },
+    [add],
+  );
+
+  /** Open the Plan page set up for a timeblock: its category's most pressing tasks, sized to the time left. */
+  // A Week block's tasks until it starts: its category's top open ones, 1–4 of them by length.
+  const blockTasks = useCallback(
+    (p: PlannedSession, minutes: number) =>
+      data.tasks
+        .filter((t) => !t.done_at && t.category_id === p.category_id)
+        .sort(byDueThenPriority)
+        .slice(0, Math.min(4, Math.max(1, Math.floor(minutes / 35)))),
+    [data.tasks],
+  );
+
+  const planFromBlock = useCallback(
+    (p: PlannedSession) => {
+      const minutes = minutesLeft(p);
+      setPlan({ selected: blockTasks(p, minutes).map((t) => t.id), length: minutes, overrides: {}, order: [], plannedId: p.id });
+    },
+    [blockTasks],
+  );
+
+  /** What a planned session starts with, for the reminder pages: its saved plan, else its block's tasks fitted to the minutes left. */
+  const splitFor = useCallback(
+    (p: PlannedSession, now = Date.now()): SplitItem<Task>[] => {
+      if (p.plan.length) {
+        return p.plan.flatMap((i) => {
+          const t = derived.task(i.task_id);
+          return t ? [{ task: t, score: 0, reason: "", suggested: i.suggested, minutes: i.minutes }] : [];
+        });
+      }
+      const minutes = minutesLeft(p, now);
+      const last = derived.lastSession;
+      return computeSplit(blockTasks(p, minutes), minutes, {
+        lastSession: last ? { planned_minutes: last.planned_minutes, alloc: derived.lastAlloc } : null,
+        daysSinceTouched: derived.daysSinceTouched,
+      });
+    },
+    [derived, blockTasks],
   );
 
   return {
@@ -430,6 +513,14 @@ function useStoreValue({ poll }: StoreOptions = {}) {
     saveReflection,
     togglePin,
     updateSettings,
+    daySettings,
+    updateDaySettings,
+    setCategoryGoal: (id: string, minutes: number | null) => void patch("categories", id, { weekly_goal_minutes: minutes }),
+    addPlanned,
+    updatePlanned: (id: string, p: Partial<PlannedSession>) => void patch("planned", id, p),
+    removePlanned: (id: string) => void drop("planned", id),
+    planFromBlock,
+    splitFor,
   };
 }
 

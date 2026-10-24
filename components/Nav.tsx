@@ -20,6 +20,9 @@ export function Nav() {
           Session
         </Link>
         {live && <span className="tag tag-accent">Live · {catName(live.block.category_id)}</span>}
+        <Link className="btn btn-ghost" href="/week" aria-current={current("/week")}>
+          Week
+        </Link>
         <Link className="btn btn-ghost" href="/tasks" aria-current={current("/tasks")}>
           Tasks
         </Link>

@@ -17,7 +17,7 @@ export default function SkipPage() {
         <span className="card-kicker">Skipped · {timeRange(done.starts_at, done.ends_at)}</span>
         <h1 className="phone-title">Skipped. Its tasks are back in your suggestions.</h1>
         <p className="text-muted" style={{ margin: 0 }}>
-          <Link href="/day">Open your day</Link> to find another window.
+          <Link href="/week">Open your week</Link> to find another time.
         </p>
       </div>
     );
