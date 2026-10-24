@@ -1,12 +1,15 @@
 // Cadence desktop shell. Shows /overlay in a transparent, always-on-top window in the
 // top-right corner of the screen, and the full app in an ordinary window. Both load the
-// Next app at CADENCE_URL and share one browser session, so sign-in and demo-mode data
-// are shared between them.
+// Next app and share one browser session, so sign-in and demo-mode data are shared
+// between them.
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const BASE = new URL(process.env.CADENCE_URL ?? "http://localhost:3000");
+// The packaged app (npm run build) loads production; `npm start` loads the local dev server.
+// CADENCE_URL overrides either.
+const PRODUCTION_URL = "https://cadence-peach-rho-65.vercel.app";
+const BASE = new URL(process.env.CADENCE_URL ?? (app.isPackaged ? PRODUCTION_URL : "http://localhost:3000"));
 const AUTH_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password", "/auth"];
 const WIDTH = 320;
 const MARGIN = 10; // gap to the screen edges

@@ -57,8 +57,11 @@ cd desktop && npm install # first time only
 npm start                 # or `npm run desktop` from the repo root
 ```
 
+To install it as an app instead, run `npm run desktop:build` on your Mac (after `cd desktop && npm install`), then drag `desktop/dist/mac-arm64/Cadence.app` (or `dist/mac/` on an Intel Mac) into Applications. The packaged app loads production (`PRODUCTION_URL` in `desktop/main.js`), so no local server is needed. Add it under **System Settings → General → Login Items** to start it when you log in.
+
+- **Signing:** the build signs ad hoc, which needs no Apple Developer account and runs on the Mac that built it. If macOS blocks a copy from another Mac, open it once, then choose **Open Anyway** in **System Settings → Privacy & Security**.
 - **⌥⌘K** shows and hides the overlay. **Open Cadence** in its footer opens the full app in a window of its own. That window shares the overlay's sign-in and demo data, so use it rather than your browser in demo mode.
-- **Settings** come from environment variables: `CADENCE_URL` (default `http://localhost:3000`), `CADENCE_OVERLAY_TONE` (`dark` or `light`), `CADENCE_OVERLAY_OPACITY` (0.5–0.95 when hovered, default 0.72) and `CADENCE_OVERLAY_REST` (0.1–0.6 at rest, default 0.3).
+- **Settings** come from environment variables: `CADENCE_URL` (default `http://localhost:3000` with `npm start`, production in the packaged app), `CADENCE_OVERLAY_TONE` (`dark` or `light`), `CADENCE_OVERLAY_OPACITY` (0.5–0.95 when hovered, default 0.72) and `CADENCE_OVERLAY_REST` (0.1–0.6 at rest, default 0.3).
 - **Sync:** windows pick up each other's changes on focus, through storage events in demo mode, and every 15 seconds in the overlay with Supabase. Before a block's hard stop fires, the app re-checks that no other window paused or ended it.
 - `/overlay` also works in an ordinary browser tab, without the always-on-top window.
 
