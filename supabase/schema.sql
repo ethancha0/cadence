@@ -95,3 +95,6 @@ select c.id as category_id, c.user_id, c.name,
   coalesce((select sum(b.spent_seconds) from session_blocks b
             where b.category_id = c.id and b.started_at >= date_trunc('week', now())), 0) / 60 as minutes_this_week
 from categories c;
+
+-- Realtime: open windows (the desktop overlay, other tabs and devices) hear about changes as they happen.
+alter publication supabase_realtime add table categories, tasks, sessions, session_blocks, notes;
