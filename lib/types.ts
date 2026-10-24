@@ -6,6 +6,7 @@ export interface Category {
   position: number;
   archived: boolean;
   created_at: string;
+  weekly_goal_minutes?: number | null; // optional: rows saved before the week planner lack it
 }
 
 export interface Task {
@@ -62,16 +63,74 @@ export interface Block {
   quick_notes: QuickNote[];
 }
 
+export type PlannedStatus = "planned" | "started" | "caught_up" | "skipped" | "missed";
+
+export interface PlanItem {
+  task_id: string | null;
+  task_title: string;
+  category_id: string;
+  minutes: number;
+  suggested: number;
+}
+
+/** A timeblock on the Week page: a session planned for a time, with a hard stop at ends_at. */
+export interface PlannedSession {
+  id: string;
+  category_id: string | null;
+  starts_at: string;
+  ends_at: string;
+  label: string;
+  until_label: string;
+  plan: PlanItem[];
+  status: PlannedStatus;
+  session_id: string | null;
+  skip_reason: string | null;
+  created_at: string;
+}
+
 export interface Snapshot {
   categories: Category[];
   tasks: Task[];
   notes: Note[];
   sessions: Session[];
   blocks: Block[];
+  planned: PlannedSession[];
 }
 
 export type Table = keyof Snapshot;
 
 export interface Settings {
   requireNotes: boolean;
+}
+
+export type CalColor = "slate" | "teal" | "sage" | "plum" | "clay" | "indigo" | "rose" | "stone";
+
+/** One iCal feed. `url` is Google Calendar's "secret address in iCal format". */
+export interface CalendarFeed {
+  id: string;
+  name: string;
+  url: string;
+  color: CalColor;
+}
+
+export interface DaySettings {
+  timezone: string;
+  day_start: string; // "HH:MM"
+  wind_down: string; // "HH:MM"
+  calendars: CalendarFeed[];
+}
+
+export interface CalEvent {
+  id: string;
+  calendar: string; // CalendarFeed.id
+  title: string;
+  start: string; // ISO instant; YYYY-MM-DD when allDay
+  end: string;
+  allDay: boolean;
+}
+
+/** What /api/calendar returns. */
+export interface CalendarResponse {
+  events: CalEvent[];
+  calendars: { id: string; ok: boolean; error?: string }[];
 }

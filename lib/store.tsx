@@ -3,11 +3,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { chime, notify, primeAlerts } from "./alerts";
 import { getBackend } from "./backend";
-import { daysSince, startOfWeek } from "./format";
+import { DEFAULT_DAY_SETTINGS } from "./calendar";
+import { byDueThenPriority, daysSince, startOfWeek } from "./format";
 import type { SplitItem } from "./split";
-import type { Block, Category, Note, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
+import type { Block, Category, DaySettings, Note, PlannedSession, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
 
-const EMPTY: Snapshot = { categories: [], tasks: [], notes: [], sessions: [], blocks: [] };
+const EMPTY: Snapshot = { categories: [], tasks: [], notes: [], sessions: [], blocks: [], planned: [] };
 const uid = () => crypto.randomUUID();
 const nowIso = () => new Date().toISOString();
 
@@ -25,6 +26,13 @@ export interface Plan {
   length: number | null; // null = default to last session's planned length
   overrides: Record<string, number>;
   order: string[]; // task ids in user-dragged order; empty = suggested (score) order
+  plannedId?: string; // set when the plan was opened from a Week timeblock; begin links the session to it
+}
+
+/** Minutes a timeblock still has before its hard stop, floored to 5 (its full length if it hasn't started). */
+export function minutesLeft(p: Pick<PlannedSession, "starts_at" | "ends_at">, now = Date.now()): number {
+  const from = Math.max(now, Date.parse(p.starts_at));
+  return Math.max(0, Math.floor((Date.parse(p.ends_at) - from) / 6e4 / 5) * 5);
 }
 
 /** Seconds worked in a block so far (wall-clock based, survives reloads). */
@@ -36,16 +44,18 @@ function useStoreValue() {
   const backend = useMemo(() => (typeof window === "undefined" ? null : getBackend()), []);
   const [data, setData] = useState<Snapshot>(EMPTY);
   const [settings, setSettings] = useState<Settings>({ requireNotes: true });
+  const [daySettings, setDaySettings] = useState<DaySettings>(DEFAULT_DAY_SETTINGS);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan>({ selected: [], length: null, overrides: {}, order: [] });
 
   const reload = useCallback(async () => {
     if (!backend) return;
-    return Promise.all([backend.load(), backend.loadSettings()]).then(
-      ([snap, s]) => {
+    return Promise.all([backend.load(), backend.loadSettings(), backend.loadDaySettings().catch(() => DEFAULT_DAY_SETTINGS)]).then(
+      ([snap, s, day]) => {
         setData(snap);
         setSettings(s);
+        setDaySettings(day);
         setError(null);
         setReady(true);
       },
@@ -109,6 +119,7 @@ function useStoreValue() {
     }
     blocksBySession.forEach((l) => l.sort((a, b) => a.position - b.position));
     const notes = [...data.notes].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const planned = [...data.planned].sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 
     const lastTouched = new Map<string, string>();
     const weekStart = startOfWeek().getTime();
@@ -147,6 +158,7 @@ function useStoreValue() {
       endedSessions,
       lastSession,
       notes,
+      planned,
       live,
       cat: (id: string): Category | undefined => catById.get(id),
       catName: (id: string) => catById.get(id)?.name ?? "Unknown category",
@@ -214,6 +226,7 @@ function useStoreValue() {
     async (split: SplitItem<Task>[]) => {
       if (!split.length || live) return;
       primeAlerts();
+      const plannedId = plan.plannedId;
       const ts = nowIso();
       const session: Session = { id: uid(), planned_minutes: split.reduce((a, s) => a + s.minutes, 0), started_at: ts, ended_at: null, pro: null, delta: null };
       const blocks: Block[] = split.map((s, i) => ({
@@ -228,8 +241,12 @@ function useStoreValue() {
       } catch (e) {
         fail(e);
       }
+      if (plannedId) {
+        const items = split.map((s) => ({ task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, minutes: s.minutes, suggested: s.suggested }));
+        void patch("planned", plannedId, { status: "started", session_id: session.id, plan: items });
+      }
     },
-    [backend, fail, live],
+    [backend, fail, live, patch, plan.plannedId],
   );
 
   const pause = useCallback(() => {
@@ -318,7 +335,7 @@ function useStoreValue() {
   const saveReflection = useCallback(
     (sessionId: string, pro: string, delta: string) => {
       void patch("sessions", sessionId, { pro: pro || null, delta: delta || null });
-      setPlan({ selected: [], length: null, overrides: {}, order: [] });
+      setPlan({ selected: [], length: null, overrides: {}, order: [] }); // also drops plannedId
     },
     [patch],
   );
@@ -339,6 +356,39 @@ function useStoreValue() {
       backend?.saveSettings(s).catch(fail);
     },
     [backend, fail],
+  );
+
+  const updateDaySettings = useCallback(
+    (s: DaySettings) => {
+      const next = { ...s, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || s.timezone };
+      setDaySettings(next);
+      return backend?.saveDaySettings(next).catch(fail);
+    },
+    [backend, fail],
+  );
+
+  // ---------- week timeblocks ----------
+
+  const addPlanned = useCallback(
+    (input: Pick<PlannedSession, "category_id" | "starts_at" | "ends_at"> & Partial<PlannedSession>) => {
+      const p: PlannedSession = {
+        id: uid(), label: "", until_label: "", plan: [], status: "planned", session_id: null, skip_reason: null, created_at: nowIso(), ...input,
+      };
+      void add("planned", [p]);
+      return p;
+    },
+    [add],
+  );
+
+  /** Open the Plan page set up for a timeblock: its category's most pressing tasks, sized to the time left. */
+  const planFromBlock = useCallback(
+    (p: PlannedSession) => {
+      const minutes = minutesLeft(p);
+      const open = data.tasks.filter((t) => !t.done_at && t.category_id === p.category_id).sort(byDueThenPriority);
+      const n = Math.min(4, Math.max(1, Math.floor(minutes / 35)));
+      setPlan({ selected: open.slice(0, n).map((t) => t.id), length: minutes, overrides: {}, order: [], plannedId: p.id });
+    },
+    [data.tasks],
   );
 
   return {
@@ -367,6 +417,13 @@ function useStoreValue() {
     saveReflection,
     togglePin,
     updateSettings,
+    daySettings,
+    updateDaySettings,
+    setCategoryGoal: (id: string, minutes: number | null) => void patch("categories", id, { weekly_goal_minutes: minutes }),
+    addPlanned,
+    updatePlanned: (id: string, p: Partial<PlannedSession>) => void patch("planned", id, p),
+    removePlanned: (id: string) => void drop("planned", id),
+    planFromBlock,
   };
 }
 

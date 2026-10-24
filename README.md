@@ -16,13 +16,17 @@ Without Supabase env vars, Cadence runs in **local demo mode**. Your data lives 
 ## Connect Supabase
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is enough).
-2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). It creates the tables, row-level security (each user sees only their own rows), and the `category_stats` view.
+2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). It creates the tables, row-level security (each user sees only their own rows), and the `category_stats` view. Then run [`supabase/week.sql`](supabase/week.sql) for the Week page (safe to re-run; existing projects only need this one).
 3. Copy `.env.example` to `.env.local` and fill in **Project Settings → API**: the project URL and the publishable (or anon) key.
 4. **Authentication → URL Configuration**: set *Site URL* to your app's origin (`http://localhost:3000` locally, your Vercel/Netlify URL in production) and add `<origin>/auth/callback` to *Redirect URLs*. Sign-up confirmation and password-reset emails land there.
 5. Restart `npm run dev`, go to `/signup`, and create your account.
 6. Optional, since it's just you: **Authentication → Providers → Email** → turn off *Allow new users to sign up*.
 
-New accounts start empty, so add your categories at the bottom of the **Tasks** page.
+New accounts start empty, so add your categories at the bottom of the **Tasks** page, with a weekly goal for each if you want the Week page to track one.
+
+### Calendars on the Week page
+
+In Google Calendar on the web: **Settings → *your calendar* → Integrate calendar → Secret address in iCal format**. Paste it into Cadence's **Settings → Calendars** and pick a colour. Repeat for each calendar. Cadence only reads these feeds (through `/api/calendar`, which only fetches `calendar.google.com` iCal addresses) and never writes to your calendar. Anyone with a secret address can read that calendar, so treat it like a password. In demo mode the Week page shows a sample timetable instead.
 
 ## Deploy (Vercel or Netlify, free tier)
 
@@ -38,6 +42,8 @@ Import the repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLIS
 | `lib/store.tsx` | One client-side store: loads all data once, writes through to the backend, derives the live session, schedules the hard stop. |
 | `lib/backend.ts` | Supabase backend, plus a localStorage backend for demo mode. |
 | `components/SwitchOverlay.tsx` | The full-screen hard stop. Rendered from the root layout, so it appears on any page. |
+| `app/(app)/week/page.tsx` | The Week page: calendar events in colour, translucent timeblocks you drag on, move and resize. Each timeblock is a `planned_sessions` row; **Plan & start** fills the Plan page from it. |
+| `app/api/calendar/route.ts`, `lib/ical.ts` | Reads the user's iCal feeds server-side and expands recurring events for the requested range. |
 | `proxy.ts` | Next 16's middleware: refreshes the Supabase session and redirects signed-out visitors to `/login`. |
 
 - **Timer** is wall-clock based (`session_blocks.resumed_at` + `spent_seconds`), so it survives tab sleep and reloads. Reopening the app mid-session resumes the current block.

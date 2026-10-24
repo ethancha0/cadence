@@ -15,7 +15,10 @@ export function seedSnapshot(): Snapshot {
   const created = day(-14).toISOString();
 
   const catNames = ["Classwork", "ZotMeet", "Tomo no Kai", "Bass Guitar", "Personal Projects"];
-  const categories: Category[] = catNames.map((name, position) => ({ id: uid(), name, position, archived: false, created_at: created }));
+  const goals = [360, 180, 120, 90, 120]; // weekly goals, minutes
+  const categories: Category[] = catNames.map((name, position) => ({
+    id: uid(), name, position, archived: false, created_at: created, weekly_goal_minutes: goals[position],
+  }));
   const [classwork, zotmeet, tomo, bass, personal] = categories.map((c) => c.id);
 
   const t = (category_id: string, title: string, due: number | null, priority: Priority): Task => ({
@@ -75,5 +78,5 @@ export function seedSnapshot(): Snapshot {
     n(personal, b5, -12, "Sketching the layout on paper first helped.", "Got lost tweaking fonts. Cap polish at 15 minutes."),
   ].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  return { categories, tasks, notes, sessions, blocks };
+  return { categories, tasks, notes, sessions, blocks, planned: [] };
 }

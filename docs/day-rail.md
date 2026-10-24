@@ -39,6 +39,8 @@ Out (later, maybe): Google OAuth / write-back, week view, Discord bot buttons, w
 
 ## Data
 
+> **Update:** the Week page (`app/(app)/week/page.tsx`) shipped first and already created `day_settings` and `planned_sessions` in `supabase/week.sql`, plus the iCal route, the calendar settings and `planned` in the store. Build on those: add only the columns below that are missing (buffer, minimum window, Discord fields, reminder toggles, `recap_sent_on`, `app_url`) with `alter table … add column if not exists`. `day_settings.calendars` items also carry `id` and `color`.
+
 New file `supabase/day-rail.sql`, run once in the SQL editor after `schema.sql`. Write it idempotently (`if not exists`, `create or replace`) and add a step for it to the README's "Connect Supabase" list.
 
 ```sql

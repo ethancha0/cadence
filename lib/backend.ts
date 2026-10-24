@@ -2,9 +2,10 @@
 // writes through to a backend: Supabase when configured, otherwise this browser's
 // localStorage with demo seed data, so the app runs before Supabase is set up.
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_DAY_SETTINGS } from "./calendar";
 import { seedSnapshot } from "./seed";
 import { createClient, supabaseConfigured } from "./supabase/client";
-import type { Settings, Snapshot, Table } from "./types";
+import type { DaySettings, Settings, Snapshot, Table } from "./types";
 
 export interface Backend {
   mode: "local" | "supabase";
@@ -14,6 +15,8 @@ export interface Backend {
   remove(table: Table, id: string): Promise<void>;
   loadSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
+  loadDaySettings(): Promise<DaySettings>;
+  saveDaySettings(s: DaySettings): Promise<void>;
 }
 
 const DEFAULT_SETTINGS: Settings = { requireNotes: true };
@@ -26,7 +29,11 @@ const TABLE: Record<Table, string> = {
   notes: "notes",
   sessions: "sessions",
   blocks: "session_blocks",
+  planned: "planned_sessions",
 };
+
+/** Postgres `time` comes back as "09:00:00"; the app uses "09:00". */
+const hhmm = (t: unknown, fallback: string) => (typeof t === "string" && /^\d{2}:\d{2}/.test(t) ? t.slice(0, 5) : fallback);
 
 class SupabaseBackend implements Backend {
   mode = "supabase" as const;
@@ -38,14 +45,16 @@ class SupabaseBackend implements Backend {
       if (error) throw error;
       return data as T[];
     };
-    const [categories, tasks, notes, sessions, blocks] = await Promise.all([
+    const [categories, tasks, notes, sessions, blocks, planned] = await Promise.all([
       q<Snapshot["categories"][number]>("categories", "position", true),
       q<Snapshot["tasks"][number]>("tasks", "created_at", true),
       q<Snapshot["notes"][number]>("notes", "created_at", false),
       q<Snapshot["sessions"][number]>("sessions", "started_at", false),
       q<Snapshot["blocks"][number]>("blocks", "position", true),
+      // Before supabase/week.sql has been run, the table doesn't exist yet: the rest of the app still loads.
+      q<Snapshot["planned"][number]>("planned", "starts_at", true).catch(() => []),
     ]);
-    return { categories, tasks, notes, sessions, blocks };
+    return { categories, tasks, notes, sessions, blocks, planned };
   }
 
   async insert(table: Table, rows: object[]) {
@@ -73,12 +82,31 @@ class SupabaseBackend implements Backend {
     const { error } = await this.sb.auth.updateUser({ data: { require_notes: s.requireNotes } });
     if (error) throw error;
   }
+
+  async loadDaySettings(): Promise<DaySettings> {
+    const { data } = await this.sb.from("day_settings").select("timezone, day_start, wind_down, calendars").maybeSingle();
+    if (!data) return DEFAULT_DAY_SETTINGS;
+    return {
+      timezone: data.timezone ?? DEFAULT_DAY_SETTINGS.timezone,
+      day_start: hhmm(data.day_start, DEFAULT_DAY_SETTINGS.day_start),
+      wind_down: hhmm(data.wind_down, DEFAULT_DAY_SETTINGS.wind_down),
+      calendars: Array.isArray(data.calendars) ? data.calendars : [],
+    };
+  }
+
+  async saveDaySettings(s: DaySettings) {
+    const { data: auth } = await this.sb.auth.getUser();
+    if (!auth.user) throw new Error("Signed out");
+    const { error } = await this.sb.from("day_settings").upsert({ user_id: auth.user.id, ...s, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  }
 }
 
 // ---------- localStorage ----------
 
 const DATA_KEY = "cadence:data:v1";
 const SETTINGS_KEY = "cadence:settings:v1";
+const DAY_KEY = "cadence:day:v1";
 
 class LocalBackend implements Backend {
   mode = "local" as const;
@@ -88,7 +116,11 @@ class LocalBackend implements Backend {
     if (this.data) return this.data;
     try {
       const raw = localStorage.getItem(DATA_KEY);
-      if (raw) return (this.data = JSON.parse(raw) as Snapshot);
+      if (raw) {
+        const d = JSON.parse(raw) as Snapshot;
+        d.planned ??= []; // saved before the week planner existed
+        return (this.data = d);
+      }
     } catch {}
     this.data = seedSnapshot();
     this.write();
@@ -141,6 +173,20 @@ class LocalBackend implements Backend {
   async saveSettings(s: Settings) {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    } catch {}
+  }
+
+  async loadDaySettings(): Promise<DaySettings> {
+    try {
+      const raw = localStorage.getItem(DAY_KEY);
+      if (raw) return { ...DEFAULT_DAY_SETTINGS, ...JSON.parse(raw) };
+    } catch {}
+    return DEFAULT_DAY_SETTINGS;
+  }
+
+  async saveDaySettings(s: DaySettings) {
+    try {
+      localStorage.setItem(DAY_KEY, JSON.stringify(s));
     } catch {}
   }
 

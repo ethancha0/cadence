@@ -164,7 +164,7 @@ function CategoryEditor() {
     <section style={{ maxWidth: 560 }}>
       <h6>Categories</h6>
       <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
-        Rename in place. Archiving hides a category and its tasks but keeps its notes and history.
+        Rename in place. The weekly goal is the time budget the Week page fills toward. Archiving hides a category and its tasks but keeps its notes and history.
       </p>
       {categories.map((c) => (
         <CategoryRow key={c.id} c={c} taken={(n) => taken(n, c.id)} />
@@ -188,15 +188,22 @@ function CategoryEditor() {
 }
 
 function CategoryRow({ c, taken }: { c: Category; taken: (n: string) => boolean }) {
-  const { renameCategory, setCategoryArchived } = useStore();
+  const { renameCategory, setCategoryArchived, setCategoryGoal } = useStore();
   const [name, setName] = useState(c.name);
+  const [goal, setGoal] = useState(c.weekly_goal_minutes ? String(c.weekly_goal_minutes / 60) : "");
+  const commitGoal = () => {
+    const h = parseFloat(goal);
+    const minutes = isNaN(h) || h <= 0 ? null : Math.round(h * 4) * 15;
+    setGoal(minutes ? String(minutes / 60) : "");
+    if (minutes !== (c.weekly_goal_minutes ?? null)) setCategoryGoal(c.id, minutes);
+  };
   const commit = () => {
     const n = name.trim();
     if (!n || n === c.name || taken(n)) return setName(c.name);
     renameCategory(c.id, n);
   };
   return (
-    <div className="cat-row" style={{ opacity: c.archived ? 0.55 : 1 }}>
+    <div className="cat-row" style={{ opacity: c.archived ? 0.55 : 1, gridTemplateColumns: "minmax(0, 1fr) auto auto" }}>
       <input
         className="input"
         value={name}
@@ -205,6 +212,23 @@ function CategoryRow({ c, taken }: { c: Category; taken: (n: string) => boolean 
         onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         aria-label={`Rename ${c.name}`}
       />
+      <label style={{ display: "flex", alignItems: "center", gap: 6 }} className="xsmall">
+        <input
+          className="input tnum"
+          type="number"
+          min={0}
+          step={0.5}
+          value={goal}
+          placeholder="—"
+          onChange={(e) => setGoal(e.target.value)}
+          onBlur={commitGoal}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          aria-label={`Weekly goal for ${c.name}, in hours`}
+          style={{ width: 72 }}
+          disabled={c.archived}
+        />
+        h / week
+      </label>
       <button className="btn btn-secondary" onClick={() => setCategoryArchived(c.id, !c.archived)}>
         {c.archived ? "Restore" : "Archive"}
       </button>
