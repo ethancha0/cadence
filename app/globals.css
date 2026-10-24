@@ -394,7 +394,7 @@ body:has(.ov-shell) { background: transparent; min-height: 0; }
 .ov-compact-text > span:first-child { font-size: 11px; }
 .ov-tasks-toggle { width: 100%; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; border: 0; background: transparent; }
 .ov-tasks-toggle > span:last-child { display: inline-flex; align-items: center; gap: 6px; }
-.ov-tasks { display: flex; flex-direction: column; padding-bottom: 6px; }
+.ov-tasks { display: flex; flex-direction: column; padding-bottom: 6px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ov-track) transparent; }
 .ov-task { display: flex; align-items: flex-start; gap: 10px; padding: 6px 14px 6px 16px; cursor: pointer; }
 .ov-task[data-now] { background: var(--ov-now); }
 .ov-task input { width: 15px; height: 15px; margin: 2px 0 0; flex: none; accent-color: var(--ov-accent); }

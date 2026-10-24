@@ -97,4 +97,14 @@ select c.id as category_id, c.user_id, c.name,
 from categories c;
 
 -- Realtime: open windows (the desktop overlay, other tabs and devices) hear about changes as they happen.
-alter publication supabase_realtime add table categories, tasks, sessions, session_blocks, notes;
+-- Adds only the tables not already in the publication, so it's safe to run again.
+do $$
+declare t text;
+begin
+  foreach t in array array['categories','tasks','sessions','session_blocks','notes'] loop
+    if not exists (select 1 from pg_publication_tables
+                   where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
