@@ -21,8 +21,8 @@ export function PlannedLanding({ children }: { children: (p: PlannedSession, now
   const p = data.planned.find((x) => x.id === id);
   if (!p) {
     return (
-      <Gone title="This session isn't on your day">
-        It may have been removed. <Link href="/day">Open your day</Link> to plan another.
+      <Gone title="This session isn't on your week">
+        It may have been removed. <Link href="/week">Open your week</Link> to plan another.
       </Gone>
     );
   }
@@ -32,7 +32,7 @@ export function PlannedLanding({ children }: { children: (p: PlannedSession, now
 
   const session = sessions.find((s) => s.id === p.session_id);
   const running = live && live.session.id === p.session_id;
-  const next = running ? <Link href="/session">Go to the session</Link> : <Link href="/day">Open your day</Link>;
+  const next = running ? <Link href="/session">Go to the session</Link> : <Link href="/week">Open your week</Link>;
   const title =
     status === "started"
       ? `Already started${session ? ` at ${clockTime(session.started_at)}` : ""}`

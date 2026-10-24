@@ -47,12 +47,12 @@ Fix anything found there before starting new work.
 
 ## Known gaps (in priority order)
 
-1. **Discord reminders.** Spec: `docs/day-rail.md` → "Reminders" and "Landing pages for reminder links". The tables already exist: add only the missing `day_settings` columns (the note at the top of that spec's Data section lists them). The reminder job works off `planned_sessions` regardless of where a row came from. A week block has an empty `plan` until it starts, so the before/start messages should name the category, and list its top 3 open tasks from SQL (due date, then priority).
-2. **Missed blocks aren't recorded.** The page shows a passed, unstarted block as "missed", but nothing writes `status = 'missed'`. That belongs to the reminder job's tick (step 2 in that spec).
-3. **Sessions started from `/` without a block** aren't matched to an overlapping block. Also the reminder tick's job (step 1).
-4. **Touch on blocks:** sidebar categories now need a 350 ms still press before they drag on touch, so swipes there scroll. Blocks on the grid still use `touch-action: none`, so a swipe that starts on one moves it instead of scrolling.
+1. **Discord reminders.** `supabase/day-rail.sql` (from main) has the reminder job, and the live project already runs it every minute. Its tick links sessions started from `/` to an overlapping block and marks passed blocks `missed`, for week blocks too. The pages its links open (`/session/start`, `/session/catch-up`, `/session/skip`) are in, and work from a week block: until it starts, its tasks come from `splitFor` in `lib/store.tsx`, the same pick as Plan & start. Still missing:
+   - Settings has no fields for the Discord webhook, user ID or the `remind_*` switches, so nobody can turn reminders on. The `day_settings` columns exist; `DaySettings` in `lib/types.ts` and `loadDaySettings` don't read them yet.
+   - The before/start messages list `plan`, which is empty for a week block until it starts. They should name the category and its top 3 open tasks from SQL (due date, then priority). The recap links to `/day`, which no longer exists: point it at `/week`.
+2. **Touch on blocks:** sidebar categories now need a 350 ms still press before they drag on touch, so swipes there scroll. Blocks on the grid still use `touch-action: none`, so a swipe that starts on one moves it instead of scrolling.
 
-Out of scope unless asked: Google OAuth / writing back to Google Calendar, `/day` from `docs/day-rail.md` (the Week page replaced it as the main planner), and the accountability-partner and pledge ideas.
+Out of scope unless asked: Google OAuth / writing back to Google Calendar, `/day` from `docs/day-rail.md` (the Week page replaced it as the main planner; its page was removed when main was merged in), and the accountability-partner and pledge ideas.
 
 ## Ground rules
 

@@ -550,3 +550,25 @@ body:has(.ov-shell) { background: transparent; min-height: 0; }
 .color-pick input:focus-visible + span { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 .cal-feed { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
 .from-week { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); margin-bottom: var(--space-6); }
+
+/* ---------- Reminder landings: /session/start, /catch-up, /skip ---------- */
+.stack-sm { display: flex; flex-direction: column; gap: var(--space-2); }
+.btn-go { font-size: 16px; padding: var(--space-3) var(--space-6); color: var(--color-accent); border-color: var(--color-accent); }
+.btn-go:not(:disabled):hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.btn-go:not(:disabled):active { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.link-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: 14px; }
+.start-page { display: flex; flex-direction: column; gap: var(--space-6); max-width: 760px; }
+.start-title { font-weight: 400; font-size: 40px; line-height: 1.1; margin: 0; }
+.start-block { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; padding: var(--space-4) 0; border-bottom: 1px solid var(--color-divider); }
+.start-block:first-child { border-top: 1px solid var(--color-divider); }
+.start-later { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-md); }
+.phone-page { display: flex; flex-direction: column; gap: var(--space-4); max-width: 440px; }
+.phone-title { font-weight: 400; font-size: 32px; line-height: 1.15; margin: 0; }
+.opt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); min-height: 44px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-md); cursor: pointer; }
+.opt:has(input:checked) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.opt input { accent-color: var(--color-accent); margin: 0; }
+.opt .xsmall { flex-basis: 100%; padding-left: 22px; }
+@media (max-width: 480px) {
+  .start-title { font-size: 32px; }
+  .btn-block-phone { width: 100%; }
+}

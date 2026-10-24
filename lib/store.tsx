@@ -5,7 +5,7 @@ import { chime, notify, primeAlerts } from "./alerts";
 import { getBackend } from "./backend";
 import { DEFAULT_DAY_SETTINGS } from "./calendar";
 import { byDueThenPriority, daysSince, startOfWeek } from "./format";
-import type { SplitItem } from "./split";
+import { computeSplit, type SplitItem } from "./split";
 import type { Block, Category, DaySettings, Note, PlannedSession, Priority, QuickNote, Session, Settings, Snapshot, Table, Task } from "./types";
 
 const EMPTY: Snapshot = { categories: [], tasks: [], notes: [], sessions: [], blocks: [], planned: [] };
@@ -274,12 +274,17 @@ function useStoreValue({ poll }: StoreOptions = {}) {
 
   // ---------- live session ----------
 
+  /**
+   * `planned` links the session to that planned row (otherwise to the Week block the plan came from), and
+   * `startedAt` backdates it, for a session caught up from a reminder. Resolves to an error message, or null.
+   */
   const beginSession = useCallback(
-    async (split: SplitItem<Task>[]) => {
-      if (!split.length || live) return;
+    async (split: SplitItem<Task>[], opts: { planned?: PlannedSession; startedAt?: string } = {}): Promise<string | null> => {
+      if (live) return "Another session is running.";
+      if (!split.length) return "Nothing to start: this category has no open tasks.";
       primeAlerts();
-      const plannedId = plan.plannedId;
-      const ts = nowIso();
+      const plannedId = opts.planned?.id ?? plan.plannedId;
+      const ts = opts.startedAt ?? nowIso();
       const session: Session = { id: uid(), planned_minutes: split.reduce((a, s) => a + s.minutes, 0), started_at: ts, ended_at: null, pro: null, delta: null };
       const blocks: Block[] = split.map((s, i) => ({
         id: uid(), session_id: session.id, task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, position: i,
@@ -290,8 +295,9 @@ function useStoreValue({ poll }: StoreOptions = {}) {
       await track(backend!.insert("sessions", [session]).then(() => backend!.insert("blocks", blocks)));
       if (plannedId) {
         const items = split.map((s) => ({ task_id: s.task.id, task_title: s.task.title, category_id: s.task.category_id, minutes: s.minutes, suggested: s.suggested }));
-        void patch("planned", plannedId, { status: "started", session_id: session.id, plan: items });
+        void patch("planned", plannedId, { status: opts.startedAt ? "caught_up" : "started", session_id: session.id, plan: items });
       }
+      return null;
     },
     [backend, live, patch, plan.plannedId, track],
   );
@@ -444,14 +450,41 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   );
 
   /** Open the Plan page set up for a timeblock: its category's most pressing tasks, sized to the time left. */
+  // A Week block's tasks until it starts: its category's top open ones, 1–4 of them by length.
+  const blockTasks = useCallback(
+    (p: PlannedSession, minutes: number) =>
+      data.tasks
+        .filter((t) => !t.done_at && t.category_id === p.category_id)
+        .sort(byDueThenPriority)
+        .slice(0, Math.min(4, Math.max(1, Math.floor(minutes / 35)))),
+    [data.tasks],
+  );
+
   const planFromBlock = useCallback(
     (p: PlannedSession) => {
       const minutes = minutesLeft(p);
-      const open = data.tasks.filter((t) => !t.done_at && t.category_id === p.category_id).sort(byDueThenPriority);
-      const n = Math.min(4, Math.max(1, Math.floor(minutes / 35)));
-      setPlan({ selected: open.slice(0, n).map((t) => t.id), length: minutes, overrides: {}, order: [], plannedId: p.id });
+      setPlan({ selected: blockTasks(p, minutes).map((t) => t.id), length: minutes, overrides: {}, order: [], plannedId: p.id });
     },
-    [data.tasks],
+    [blockTasks],
+  );
+
+  /** What a planned session starts with, for the reminder pages: its saved plan, else its block's tasks fitted to the minutes left. */
+  const splitFor = useCallback(
+    (p: PlannedSession, now = Date.now()): SplitItem<Task>[] => {
+      if (p.plan.length) {
+        return p.plan.flatMap((i) => {
+          const t = derived.task(i.task_id);
+          return t ? [{ task: t, score: 0, reason: "", suggested: i.suggested, minutes: i.minutes }] : [];
+        });
+      }
+      const minutes = minutesLeft(p, now);
+      const last = derived.lastSession;
+      return computeSplit(blockTasks(p, minutes), minutes, {
+        lastSession: last ? { planned_minutes: last.planned_minutes, alloc: derived.lastAlloc } : null,
+        daysSinceTouched: derived.daysSinceTouched,
+      });
+    },
+    [derived, blockTasks],
   );
 
   return {
@@ -487,6 +520,7 @@ function useStoreValue({ poll }: StoreOptions = {}) {
     updatePlanned: (id: string, p: Partial<PlannedSession>) => void patch("planned", id, p),
     removePlanned: (id: string) => void drop("planned", id),
     planFromBlock,
+    splitFor,
   };
 }
 
