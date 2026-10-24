@@ -354,11 +354,12 @@ button.check { cursor: pointer; }
 .palette { display: flex; flex-direction: column; gap: var(--space-2); }
 .palette-chip {
   display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; font: inherit; color: inherit;
-  cursor: grab; touch-action: none; user-select: none; padding: var(--space-2) var(--space-3);
+  cursor: grab; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; padding: var(--space-2) var(--space-3);
   background: color-mix(in srgb, var(--color-accent) 10%, transparent); border: 1.5px solid var(--color-accent); border-radius: var(--radius-md);
 }
 .palette-chip:hover { background: color-mix(in srgb, var(--color-accent) 16%, transparent); }
 .palette-chip:active { cursor: grabbing; }
+.palette-chip.holding { background: color-mix(in srgb, var(--color-accent) 24%, transparent); }
 .palette-top { display: flex; align-items: center; gap: var(--space-2); width: 100%; }
 .palette-top svg { color: var(--color-accent-700); flex: none; }
 .palette-name { font-size: 13px; font-weight: 600; flex: 1 1 auto; min-width: 0; }
@@ -385,6 +386,7 @@ button.check { cursor: pointer; }
 .week-col.today { background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
 .week-past { position: absolute; left: 0; right: 0; top: 0; background: color-mix(in srgb, var(--color-neutral-100) 55%, transparent); z-index: 2; pointer-events: none; }
 .week-hour { position: absolute; right: 8px; font-size: 11px; color: var(--color-neutral-700); white-space: nowrap; transform: translateY(-50%); }
+.week-hour:first-child { transform: translateY(2px); }
 .week-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); }
 .week-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--color-accent-700); z-index: 6; pointer-events: none; }
 .cal-ev { position: absolute; left: 3px; right: 3px; box-sizing: border-box; border-radius: 3px; padding: 3px 6px; overflow: hidden; z-index: 1; font-size: 11px; line-height: 1.25; }

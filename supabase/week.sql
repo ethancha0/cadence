@@ -38,6 +38,8 @@ create table if not exists planned_sessions (
   created_at     timestamptz not null default now(),
   check (ends_at > starts_at)
 );
+-- A database that already ran docs/day-rail.sql has planned_sessions without category_id, and the create above skips it.
+alter table planned_sessions add column if not exists category_id uuid references categories on delete cascade;
 create index if not exists planned_sessions_due on planned_sessions (status, starts_at);
 create index if not exists planned_sessions_user on planned_sessions (user_id, starts_at);
 

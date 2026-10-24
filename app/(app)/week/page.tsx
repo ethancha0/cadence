@@ -213,10 +213,7 @@ function Week() {
     setGhost(null);
   }, [commit, create]);
 
-  const startDrag = (e: ReactPointerEvent, d: Drag) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
+  const follow = (d: Drag) => {
     dragRef.current = d;
     const up = () => {
       window.removeEventListener("pointermove", onMove);
@@ -228,6 +225,62 @@ function Week() {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   };
+
+  const startDrag = (e: ReactPointerEvent, d: Drag) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    follow(d);
+  };
+
+  // On touch a category only drags after a still press, so a swipe that starts on one scrolls the page.
+  const [holding, setHolding] = useState<string | null>(null);
+  const holdToDrag = (e: ReactPointerEvent, d: Drag & { mode: "new" }) => {
+    const pid = e.pointerId;
+    const stop = () => {
+      clearTimeout(timer);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId === pid && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) > 8) stop();
+    };
+    const timer = window.setTimeout(() => {
+      stop();
+      // a press that turned into a drag isn't also a tap
+      justDragged.current = true;
+      setHolding(d.categoryId);
+      follow(d);
+    }, 350);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  };
+
+  // Once a held drag is live, keep the finger from scrolling the page. Registered up front and non-passive,
+  // since browsers only let a touchmove listener cancel scrolling if it was there when the touch began.
+  const paletteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = paletteRef.current;
+    if (!el) return;
+    const block = (ev: TouchEvent) => dragRef.current && ev.preventDefault();
+    el.addEventListener("touchmove", block, { passive: false });
+    return () => el.removeEventListener("touchmove", block);
+  }, [ready]);
+  useEffect(() => {
+    if (!holding) return;
+    const end = () => {
+      setHolding(null);
+      setTimeout(() => (justDragged.current = false), 0);
+    };
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [holding]);
 
   const busy = useCallback(
     (exceptId?: string): Span[] => [...events, ...blocks.filter((b) => b.p.id !== exceptId && !b.missed)],
@@ -254,9 +307,18 @@ function Week() {
     }
     if (s) {
       e.preventDefault();
+      // a block moved to another day remounts in that column, so focus has to follow it there
+      if (s.day !== b.day) refocus.current = { id: b.p.id, day: s.day };
       commit(b.p.id, { day: s.day, start: s.start, end: s.end });
     }
   };
+  const refocus = useRef<{ id: string; day: number } | null>(null);
+  useEffect(() => {
+    const r = refocus.current;
+    if (!r || !blocks.some((b) => b.p.id === r.id && b.day === r.day)) return;
+    refocus.current = null;
+    gridRef.current?.querySelector<HTMLElement>(`[data-block="${r.id}"]`)?.focus();
+  }, [blocks]);
 
   // ---------- derived for the sidebar ----------
 
@@ -325,7 +387,7 @@ function Week() {
             <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
               {weekOver ? "This week is over." : "Drag one onto the week, or press it to drop an hour in the first free slot."}
             </p>
-            <div className="palette">
+            <div className="palette" ref={paletteRef}>
               {activeCategories.map((c) => {
                 const got = placed.get(c.id) ?? 0;
                 const goal = c.weekly_goal_minutes ?? 0;
@@ -333,9 +395,13 @@ function Week() {
                 return (
                   <button
                     key={c.id}
-                    className="palette-chip"
+                    className={`palette-chip${holding === c.id ? " holding" : ""}`}
                     disabled={weekOver}
-                    onPointerDown={(e) => startDrag(e, { mode: "new", categoryId: c.id, hours: 1, x0: e.clientX, y0: e.clientY, moved: false })}
+                    onPointerDown={(e) => {
+                      const d = { mode: "new" as const, categoryId: c.id, hours: 1, x0: e.clientX, y0: e.clientY, moved: false };
+                      if (e.pointerType === "touch") holdToDrag(e, d);
+                      else startDrag(e, d);
+                    }}
                     onClick={() => autoPlace(c.id)}
                     aria-label={`${c.name}: ${hm(got)} placed${goal ? ` of ${hm(goal)}` : ""}. Drag onto the week, or press to add an hour in the first free slot.`}
                   >
@@ -478,9 +544,9 @@ function Week() {
               </div>
               <div className="week-body" ref={gridRef} style={{ height: gridH }}>
                 <div className="week-gutter">
-                  {Array.from({ length: dayEnd - dayStart - 1 }, (_, i) => (
-                    <span key={i} className="week-hour" style={{ top: (i + 1) * HOUR_PX }}>
-                      {hourLabel(dayStart + i + 1)}
+                  {Array.from({ length: dayEnd - dayStart }, (_, i) => (
+                    <span key={i} className="week-hour" style={{ top: i * HOUR_PX }}>
+                      {hourLabel(dayStart + i)}
                     </span>
                   ))}
                 </div>
@@ -517,6 +583,7 @@ function Week() {
                             <div key={b.p.id} className={cls} style={{ top: (s.start - dayStart) * HOUR_PX, height: hpx }}>
                               <button
                                 className="tb-hit"
+                                data-block={b.p.id}
                                 aria-label={`${b.label} timeblock, ${DAY_NAMES[s.day]} ${hourRange(s.start, s.end)}${over.length ? `, over ${over.join(", ")}` : ""}.${b.locked ? "" : " Arrow keys move, Shift and arrows resize, Delete removes."}`}
                                 onPointerDown={(e) => {
                                   setSel(b.p.id);

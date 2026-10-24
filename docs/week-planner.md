@@ -33,7 +33,7 @@ Design reference: artboard **B2 · Week horizon** on the private "Cadence — Da
 
 ## First: verify against real data
 
-1. In Supabase, run `supabase/week.sql`. Sign in, open `/week`: no errors, empty grid.
+1. In Supabase, run `supabase/week.sql`. Sign in, open `/week`: no errors, empty grid. (The live project had already run `day-rail.sql`, so `planned_sessions` existed without `category_id`; `week.sql` now adds that column too.)
 2. Settings → Calendars: paste a real secret iCal address and pick a colour. On `/week`, check:
    - a weekly class repeats on the right days and times;
    - a single moved or cancelled instance shows correctly;
@@ -50,8 +50,7 @@ Fix anything found there before starting new work.
 1. **Discord reminders.** Spec: `docs/day-rail.md` → "Reminders" and "Landing pages for reminder links". The tables already exist: add only the missing `day_settings` columns (the note at the top of that spec's Data section lists them). The reminder job works off `planned_sessions` regardless of where a row came from. A week block has an empty `plan` until it starts, so the before/start messages should name the category, and list its top 3 open tasks from SQL (due date, then priority).
 2. **Missed blocks aren't recorded.** The page shows a passed, unstarted block as "missed", but nothing writes `status = 'missed'`. That belongs to the reminder job's tick (step 2 in that spec).
 3. **Sessions started from `/` without a block** aren't matched to an overlapping block. Also the reminder tick's job (step 1).
-4. **Touch:** a swipe that starts on a sidebar category doesn't scroll the page, because `touch-action: none` lets it drag. Consider a long-press to start the drag on touch.
-5. **Small:** focus is lost when arrow keys move a block to another day, since the button remounts in a new column. The hour labels skip the first hour (9 AM) at the grid's top edge.
+4. **Touch on blocks:** sidebar categories now need a 350 ms still press before they drag on touch, so swipes there scroll. Blocks on the grid still use `touch-action: none`, so a swipe that starts on one moves it instead of scrolling.
 
 Out of scope unless asked: Google OAuth / writing back to Google Calendar, `/day` from `docs/day-rail.md` (the Week page replaced it as the main planner), and the accountability-partner and pledge ideas.
 
