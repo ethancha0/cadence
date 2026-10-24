@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { CAL_COLOR_LABEL, CAL_COLORS, isGoogleIcalUrl, maskIcalUrl } from "@/lib/calendar";
 import { DEMO_CALENDARS } from "@/lib/demo-calendar";
 import { useStore } from "@/lib/store";
 import type { CalColor, CalendarFeed } from "@/lib/types";
+import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
 
 function ColorPick({ name, value, onChange }: { name: string; value: CalColor; onChange: (c: CalColor) => void }) {
   return (
@@ -19,7 +21,111 @@ function ColorPick({ name, value, onChange }: { name: string; value: CalColor; o
   );
 }
 
-/** Settings → Calendars and Your day. Feeds are Google Calendar's secret iCal addresses, read by /api/calendar. */
+/** What /api/google/callback reports back in ?google=. */
+const CONNECT_RESULT: Record<string, { text: string; bad?: boolean }> = {
+  connected: { text: "Google Calendar is connected. Every calendar in the account now shows on the Week page." },
+  denied: { text: "Google Calendar wasn't connected: the request was cancelled on Google's screen.", bad: true },
+  scopes: { text: "Cadence needs both permissions Google asks for, your list of calendars and their events. Connect again and leave both ticked.", bad: true },
+  expired: { text: "That sign-in took too long or was started in another tab. Try again.", bad: true },
+  "no-table": { text: "Run supabase/google.sql in the Supabase SQL editor, then connect again.", bad: true },
+  "api-off": {
+    text: "Google turned Cadence away: the Google Calendar API is off in your Google Cloud project. Enable it (APIs & Services → Library → Google Calendar API, in the same project as the OAuth client), wait a minute, then connect again.",
+    bad: true,
+  },
+  client: { text: "Google didn't accept GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. Copy them again from Google Auth Platform → Clients and restart the dev server.", bad: true },
+  unconfigured: { text: "Google sign-in isn't set up yet: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are missing on the server (see the README).", bad: true },
+  error: { text: "Google Calendar couldn't be connected. Try again; the server log has the details.", bad: true },
+};
+
+/** Connect Google Calendar: every calendar in the account is imported, with an on/off switch and a colour each. */
+function GoogleCalendars({ feeds, save }: { feeds: CalendarFeed[]; save: (calendars: CalendarFeed[]) => void }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const [result] = useState(() => CONNECT_RESULT[params.get("google") ?? ""] ?? null);
+  const { status, refresh, disconnect } = useGoogleCalendar();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const google = feeds.filter((f) => f.google);
+
+  // The result has been read: drop ?google= so a reload doesn't show it again.
+  useEffect(() => {
+    if (params.get("google")) router.replace("/settings", { scroll: false });
+  }, [params, router]);
+
+  const onDisconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await disconnect();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const problem = error ?? status?.error;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginBottom: "var(--space-4)" }}>
+      {result && (
+        <p className="small" style={{ margin: 0, color: result.bad ? "var(--color-accent-700)" : undefined }}>
+          {result.text}
+        </p>
+      )}
+      {!status ? (
+        <p className="text-muted small" style={{ margin: 0 }}>
+          Checking Google Calendar…
+        </p>
+      ) : !status.configured ? (
+        <p className="text-muted small" style={{ margin: 0 }}>
+          To connect Google Calendar in one click, set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server (see the README). Until then, add
+          calendars by their iCal address below.
+        </p>
+      ) : !status.email ? (
+        <div>
+          <a className="btn btn-primary" href="/api/google/connect">
+            Connect Google Calendar
+          </a>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+            <span className="small">Google Calendar: {status.email}</span>
+            <button className="btn btn-secondary" onClick={onDisconnect} disabled={busy}>
+              Disconnect
+            </button>
+          </div>
+          {google.map((f) => (
+            <div key={f.id} className="cal-feed" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                <label className="cal-toggle">
+                  <input type="checkbox" checked={!f.off} onChange={() => save(feeds.map((x) => (x.id === f.id ? { ...x, off: !x.off } : x)))} />
+                  <span className="cal-swatch" style={{ background: `var(--cal-${f.color}-bg)`, boxShadow: `inset 0 0 0 1.5px var(--cal-${f.color}-sw)` }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                </label>
+                {!f.off && <ColorPick name={`color-${f.id}`} value={f.color} onChange={(c) => save(feeds.map((x) => (x.id === f.id ? { ...x, color: c } : x)))} />}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {problem && (
+        <p className="xsmall" style={{ margin: 0, color: "var(--color-accent-700)" }}>
+          {problem}{" "}
+          {status?.email ? (
+            <a href="/api/google/connect">Reconnect</a>
+          ) : (
+            <button className="btn btn-ghost xsmall" onClick={refresh}>
+              Try again
+            </button>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Settings → Calendars and Your day. Calendars come from the connected Google account or from secret iCal addresses, read by /api/calendar. */
 export function CalendarSettings() {
   const { mode, daySettings, updateDaySettings } = useStore();
   const feeds = daySettings.calendars;
@@ -45,7 +151,7 @@ export function CalendarSettings() {
       <section>
         <h6>Calendars</h6>
         <p className="text-muted small">
-          Paste each calendar&apos;s secret iCal address. Its events show in colour on the Week page. Cadence only reads them and never changes your calendar.
+          Events from your calendars show in colour on the Week page. Cadence only reads them and never changes your calendar.
         </p>
         {mode === "local" ? (
           <>
@@ -60,7 +166,9 @@ export function CalendarSettings() {
           </>
         ) : (
           <>
-            {feeds.map((f) => (
+            <GoogleCalendars feeds={feeds} save={(c) => void save(c)} />
+            {feeds.some((f) => !f.google) && <p className="text-muted xsmall" style={{ margin: 0 }}>By iCal address</p>}
+            {feeds.filter((f) => !f.google).map((f) => (
               <div key={f.id} className="cal-feed" style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                   <span className="small">{f.name}</span>

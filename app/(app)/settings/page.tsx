@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { CalendarSettings } from "@/components/CalendarSettings";
 import { chime, notifyPermission, requestNotifyPermission, testNotify, type NotifyPermission, type TestResult } from "@/lib/alerts";
 import { resetLocalDemo } from "@/lib/backend";
@@ -58,7 +58,9 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <CalendarSettings />
+        <Suspense>
+          <CalendarSettings />
+        </Suspense>
 
         <section>
           <h6>Notifications</h6>

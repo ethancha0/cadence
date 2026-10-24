@@ -16,12 +16,13 @@ export interface CalendarState {
   refresh: () => void;
 }
 
-/** Events from the user's iCal feeds between `from` and `to`. Demo mode returns the sample timetable. */
-export function useCalendar(mode: "local" | "supabase", feeds: CalendarFeed[], from: Date, to: Date): CalendarState {
+/** Events from the user's calendars between `from` and `to`. Google calendars switched off in Settings are left out. Demo mode returns the sample timetable. */
+export function useCalendar(mode: "local" | "supabase", allFeeds: CalendarFeed[], from: Date, to: Date): CalendarState {
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
   const demo = mode === "local";
-  const feedKey = feeds.map((f) => f.id + f.url).join("|");
+  const feeds = allFeeds.filter((f) => !f.off);
+  const feedKey = feeds.map((f) => f.id + (f.google ?? f.url)).join("|");
   const [state, setState] = useState<{ key: string; res: CalendarResponse | null; error: string | null; at: number | null }>({ key: "", res: null, error: null, at: null });
   const [tick, setTick] = useState(0);
   const key = `${fromIso}|${toIso}|${feedKey}`; // a refresh (tick) refetches but keeps showing the old events meanwhile

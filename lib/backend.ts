@@ -2,7 +2,7 @@
 // writes through to a backend: Supabase when configured, otherwise this browser's
 // localStorage with demo seed data, so the app runs before Supabase is set up.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_DAY_SETTINGS } from "./calendar";
+import { DEFAULT_DAY_SETTINGS, normalizeFeeds } from "./calendar";
 import { seedSnapshot } from "./seed";
 import { createClient, supabaseConfigured } from "./supabase/client";
 import type { DaySettings, Settings, Snapshot, Table } from "./types";
@@ -92,7 +92,7 @@ class SupabaseBackend implements Backend {
       timezone: data.timezone ?? DEFAULT_DAY_SETTINGS.timezone,
       day_start: hhmm(data.day_start, DEFAULT_DAY_SETTINGS.day_start),
       wind_down: hhmm(data.wind_down, DEFAULT_DAY_SETTINGS.wind_down),
-      calendars: Array.isArray(data.calendars) ? data.calendars : [],
+      calendars: normalizeFeeds(data.calendars),
     };
   }
 

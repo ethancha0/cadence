@@ -9,6 +9,7 @@ import { startOfWeek } from "@/lib/format";
 import { minutesLeft, useNow, useStore } from "@/lib/store";
 import type { CalColor, PlannedSession } from "@/lib/types";
 import { useCalendar } from "@/lib/useCalendar";
+import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
 import { addDays, atHour, firstFreeSlot, hm, hourLabel, hourRange, overlaps, snap, toSlot, weekFromParam, weekParam, type Span } from "@/lib/week";
 
 const HOUR_PX = 40;
@@ -59,6 +60,7 @@ function Week() {
   const dayEnd = Math.max(dayStart + 1, Math.min(24, Math.ceil(timeToHours(daySettings.wind_down))));
   const gridH = (dayEnd - dayStart) * HOUR_PX;
 
+  useGoogleCalendar(); // picks up calendars added to the Google account since the last visit
   const cal = useCalendar(mode, daySettings.calendars, monday, sunday);
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const colorOf = useMemo(() => new Map(cal.feeds.map((f) => [f.id, f.color])), [cal.feeds]);
@@ -506,7 +508,7 @@ function Week() {
               {mode === "local" && "Sample calendars (demo mode)."}
               {mode === "supabase" && !cal.feeds.length && (
                 <>
-                  No calendars yet. <Link href="/settings">Add one in Settings</Link>.
+                  No calendars yet. <Link href="/settings">Connect Google Calendar in Settings</Link>.
                 </>
               )}
               {mode === "supabase" && cal.feeds.length > 0 && (cal.loading ? "Loading…" : cal.error ? cal.error : cal.updatedAt ? `Updated ${updatedAgo(cal.updatedAt, nowMs)}. ` : "")}

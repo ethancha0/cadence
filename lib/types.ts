@@ -105,12 +105,26 @@ export interface Settings {
 
 export type CalColor = "slate" | "teal" | "sage" | "plum" | "clay" | "indigo" | "rose" | "stone";
 
-/** One iCal feed. `url` is Google Calendar's "secret address in iCal format". */
+/**
+ * One calendar on the Week page: either a calendar of the connected Google account (`google` is its
+ * calendar id, `url` is "") or an iCal feed (`url` is Google Calendar's "secret address in iCal format").
+ */
 export interface CalendarFeed {
   id: string;
   name: string;
   url: string;
   color: CalColor;
+  google?: string;
+  /** Google calendars stay listed when switched off, so the next sync doesn't add them back. */
+  off?: boolean;
+}
+
+/** What GET /api/google returns. */
+export interface GoogleStatus {
+  configured: boolean; // GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set on the server
+  email: string | null; // the connected account, null when not connected
+  calendars: { id: string; name: string }[];
+  error?: string;
 }
 
 export interface DaySettings {

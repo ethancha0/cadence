@@ -29,11 +29,20 @@ New accounts start empty, so add your categories at the bottom of the **Tasks** 
 
 ### Calendars on the Week page
 
-In Google Calendar on the web: **Settings → *your calendar* → Integrate calendar → Secret address in iCal format**. Paste it into Cadence's **Settings → Calendars** and pick a colour. Repeat for each calendar. Cadence only reads these feeds (through `/api/calendar`, which only fetches `calendar.google.com` iCal addresses) and never writes to your calendar. Anyone with a secret address can read that calendar, so treat it like a password. In demo mode the Week page shows a sample timetable instead.
+**Connect Google Calendar (recommended).** Settings → Calendars → *Connect Google Calendar* imports every calendar in your Google account, each with an on/off switch and a colour. Calendars you add to Google later show up on their own the next time you open Week or Settings. Cadence asks only for read-only access (your calendar list and events) and never writes. One-time setup:
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project (or pick one), then **APIs & Services → Library → Google Calendar API → Enable**.
+2. **Google Auth Platform** (the OAuth consent screen): *Branding*: app name "Cadence" and your email. *Audience*: External, and add your Google address under *Test users*. *Data Access → Add or remove scopes*: add `.../auth/calendar.calendarlist.readonly` and `.../auth/calendar.events.readonly`.
+3. *Audience → Publish app*. While the app is in *Testing*, Google expires its sign-ins after 7 days and you'd have to reconnect every week. Publishing without verification is fine for personal use: Google shows a "Google hasn't verified this app" screen when you connect, and you continue through *Advanced → Go to Cadence*.
+4. *Clients → Create client → Web application*. Under **Authorized redirect URIs** add `http://localhost:3000/api/google/callback`, plus `https://<your production origin>/api/google/callback` once you deploy.
+5. Put the client ID and secret in `.env.local` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (server-only: no `NEXT_PUBLIC_`), and in your host's environment variables when you deploy.
+6. Run [`supabase/google.sql`](supabase/google.sql) in the Supabase SQL editor, restart `npm run dev`, and click *Connect Google Calendar*.
+
+**Or paste an iCal address.** Without the Google setup, the same Settings section takes secret iCal addresses. In Google Calendar on the web: **Settings → *your calendar* → Integrate calendar → Secret address in iCal format**. Paste it into Cadence's **Settings → Calendars** and pick a colour. Repeat for each calendar. Cadence only reads these feeds (through `/api/calendar`, which only fetches `calendar.google.com` iCal addresses) and never writes to your calendar. Anyone with a secret address can read that calendar, so treat it like a password. In demo mode the Week page shows a sample timetable instead.
 
 ## Deploy (Vercel or Netlify, free tier)
 
-Import the repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` as environment variables, and deploy. Then update the Supabase Site URL and redirect URL (step 4) to the deployed origin.
+Import the repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` if you use Connect Google Calendar) as environment variables, and deploy. Then update the Supabase Site URL and redirect URL (step 4) to the deployed origin, and add the deployed `/api/google/callback` to the Google OAuth client's redirect URIs.
 
 **Free-tier caveat:** Supabase pauses free projects after about a week with no activity. While paused, the app can't load data (and the future Claude connector won't answer). Resume the project from the Supabase dashboard.
 
@@ -47,6 +56,7 @@ Import the repo, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLIS
 | `components/SwitchOverlay.tsx` | The full-screen hard stop. Rendered from the root layout, so it appears on any page. |
 | `app/(app)/week/page.tsx` | The Week page: calendar events in colour, translucent timeblocks you drag on, move and resize. Each timeblock is a `planned_sessions` row; **Plan & start** fills the Plan page from it. |
 | `app/api/calendar/route.ts`, `lib/ical.ts` | Reads the user's iCal feeds server-side and expands recurring events for the requested range. |
+| `app/api/google/*`, `lib/google.ts`, `lib/useGoogleCalendar.ts` | Connect Google Calendar: the OAuth round trip (`connect` → Google → `callback`), the stored grant in `google_connections`, and the import that keeps one feed per Google calendar in `day_settings.calendars`. |
 | `proxy.ts` | Next 16's middleware: refreshes the Supabase session and redirects signed-out visitors to `/login`. |
 | `components/DesktopOverlay.tsx` | The desktop overlay at `/overlay`: current block, session, last note and tasks in one small panel. |
 | `desktop/` | The Electron shell that pins `/overlay` to the top-right of your screen. |
