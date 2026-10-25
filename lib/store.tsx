@@ -450,13 +450,17 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   );
 
   /** Open the Plan page set up for a timeblock: its category's most pressing tasks, sized to the time left. */
-  // A Week block's tasks until it starts: its category's top open ones, 1–4 of them by length.
+  // A Week block's tasks until it starts: the open ones assigned to it on the Week page, else its category's
+  // top open ones, 1–4 of them by length.
   const blockTasks = useCallback(
-    (p: PlannedSession, minutes: number) =>
-      data.tasks
+    (p: PlannedSession, minutes: number) => {
+      const assigned = p.plan.flatMap((i) => data.tasks.filter((t) => t.id === i.task_id && !t.done_at));
+      if (assigned.length) return assigned;
+      return data.tasks
         .filter((t) => !t.done_at && t.category_id === p.category_id)
         .sort(byDueThenPriority)
-        .slice(0, Math.min(4, Math.max(1, Math.floor(minutes / 35)))),
+        .slice(0, Math.min(4, Math.max(1, Math.floor(minutes / 35))));
+    },
     [data.tasks],
   );
 
@@ -471,7 +475,8 @@ function useStoreValue({ poll }: StoreOptions = {}) {
   /** What a planned session starts with, for the reminder pages: its saved plan, else its block's tasks fitted to the minutes left. */
   const splitFor = useCallback(
     (p: PlannedSession, now = Date.now()): SplitItem<Task>[] => {
-      if (p.plan.length) {
+      // Tasks assigned on the Week page have no minutes yet; they're split below like the category's tasks.
+      if (p.plan.some((i) => i.minutes > 0)) {
         return p.plan.flatMap((i) => {
           const t = derived.task(i.task_id);
           return t ? [{ task: t, score: 0, reason: "", suggested: i.suggested, minutes: i.minutes }] : [];

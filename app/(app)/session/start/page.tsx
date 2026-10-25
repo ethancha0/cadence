@@ -115,7 +115,7 @@ function Start({ p, now }: { p: PlannedSession; now: number }) {
         <section aria-label="Later today" className="start-later">
           <span className="card-kicker" style={{ color: "var(--color-neutral-800)" }}>Later today</span>
           <span className="card-title" style={{ fontSize: 20 }}>
-            {later.label || "Session"} · {timeRange(later.starts_at, later.ends_at)}
+            {later.label || (later.category_id ? catName(later.category_id) : "Session")} · {timeRange(later.starts_at, later.ends_at)}
           </span>
           <span className="text-muted small">{splitFor(later, now).map((i) => i.task.title).join(", ")}</span>
         </section>

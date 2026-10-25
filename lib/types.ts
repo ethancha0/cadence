@@ -81,6 +81,7 @@ export interface PlannedSession {
   ends_at: string;
   label: string;
   until_label: string;
+  /** Before the session starts: tasks assigned on the Week page (minutes 0). Once it starts: the split it ran with. */
   plan: PlanItem[];
   status: PlannedStatus;
   session_id: string | null;

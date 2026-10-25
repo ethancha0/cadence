@@ -7,10 +7,11 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type Keybo
 import { timeToHours } from "@/lib/calendar";
 import { startOfWeek } from "@/lib/format";
 import { minutesLeft, useNow, useStore } from "@/lib/store";
-import type { CalColor, PlannedSession } from "@/lib/types";
+import { byDueThenPriority, dueLabel } from "@/lib/format";
+import type { CalColor, PlannedSession, Task } from "@/lib/types";
 import { useCalendar } from "@/lib/useCalendar";
 import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
-import { addDays, atHour, firstFreeSlot, hm, hourLabel, hourRange, overlaps, snap, toSlot, weekFromParam, weekParam, type Span } from "@/lib/week";
+import { addDays, atHour, firstFreeSlot, hm, hourLabel, hourRange, snap, toSlot, weekFromParam, weekParam, type Span } from "@/lib/week";
 
 const HOUR_PX = 40;
 const GUTTER = 48;
@@ -20,7 +21,9 @@ const SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 type Drag =
   | { mode: "move"; id: string; grab: number; span: Span; x0: number; y0: number; moved: boolean }
   | { mode: "resize"; id: string; span: Span; x0: number; y0: number; moved: boolean }
-  | { mode: "new"; categoryId: string; hours: number; x0: number; y0: number; moved: boolean };
+  | { mode: "new"; categoryId: string; taskId?: string; hours: number; x0: number; y0: number; moved: boolean };
+
+const HIDDEN_KEY = "cadence:week-hidden";
 
 interface GridEvent extends Span {
   id: string;
@@ -30,12 +33,17 @@ interface GridEvent extends Span {
 
 interface GridBlock extends Span {
   p: PlannedSession;
-  label: string;
+  label: string; // the category
+  note: string; // what you'll do, typed in the Selected card
+  tasks: string[]; // titles of the tasks assigned to it
   locked: boolean;
   missed: boolean;
 }
 
 const calVars = (c: CalColor) => ({ background: `var(--cal-${c}-bg)`, color: `var(--cal-${c}-fg)` });
+
+/** A task assigned to a timeblock. Minutes are worked out when its session starts. */
+const planItem = (t: Task) => ({ task_id: t.id, task_title: t.title, category_id: t.category_id, minutes: 0, suggested: 0 });
 
 export default function WeekPage() {
   return (
@@ -47,7 +55,7 @@ export default function WeekPage() {
 
 function Week() {
   const store = useStore();
-  const { ready, mode, daySettings, planned, activeCategories, catName, addPlanned, updatePlanned, removePlanned, planFromBlock, live } = store;
+  const { ready, mode, data, daySettings, planned, activeCategories, catName, addPlanned, updatePlanned, removePlanned, planFromBlock, live } = store;
   const router = useRouter();
   const params = useSearchParams();
   const wParam = params.get("w");
@@ -62,7 +70,22 @@ function Week() {
 
   useGoogleCalendar(); // picks up calendars added to the Google account since the last visit
   const cal = useCalendar(mode, daySettings.calendars, monday, sunday);
-  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  // Which calendars are hidden on this page, remembered in this browser.
+  const [hidden, setHiddenState] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
+  });
+  const setHidden = (next: Record<string, boolean>) => {
+    setHiddenState(next);
+    try {
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
+    } catch {}
+  };
+  const allHidden = cal.feeds.length > 0 && cal.feeds.every((f) => hidden[f.id]);
+  const someHidden = cal.feeds.some((f) => hidden[f.id]);
   const colorOf = useMemo(() => new Map(cal.feeds.map((f) => [f.id, f.color])), [cal.feeds]);
 
   // ---------- events and blocks, as spans on the grid ----------
@@ -103,12 +126,15 @@ function Week() {
         const a = toSlot(monday, new Date(p.starts_at));
         const b = toSlot(monday, new Date(p.ends_at));
         const ended = Date.parse(p.ends_at) <= nowMs;
+        const label = catName(p.category_id!);
         return {
           p,
           day: a.day,
           start: a.hour,
           end: b.day === a.day ? b.hour : 24,
-          label: catName(p.category_id!),
+          label,
+          note: p.label === label ? "" : p.label, // blocks made before notes existed carry the category name
+          tasks: p.plan.map((i) => i.task_title),
           locked: p.status !== "planned" || ended,
           missed: p.status === "missed" || (p.status === "planned" && ended),
         };
@@ -116,11 +142,19 @@ function Week() {
     [weekPlanned, monday, nowMs, catName],
   );
 
+  // Open tasks in active categories, most pressing first.
+  const openTasks = useMemo(() => {
+    const active = new Set(activeCategories.map((c) => c.id));
+    return data.tasks.filter((t) => !t.done_at && active.has(t.category_id)).sort(byDueThenPriority);
+  }, [data.tasks, activeCategories]);
+  const taskById = useMemo(() => new Map(openTasks.map((t) => [t.id, t])), [openTasks]);
+
   // ---------- selection & drag ----------
 
   const [sel, setSel] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ id: string; span: Span } | null>(null);
-  const [ghost, setGhost] = useState<{ categoryId: string; span: Span; valid: boolean } | null>(null);
+  // `into`: a task held over an existing timeblock, which it joins on drop instead of making a new one.
+  const [ghost, setGhost] = useState<{ categoryId: string; taskId?: string; span: Span; valid: boolean; into?: string } | null>(null);
   const draftRef = useRef(draft);
   const ghostRef = useRef(ghost);
   const dragRef = useRef<Drag | null>(null);
@@ -161,17 +195,27 @@ function Week() {
   );
 
   const create = useCallback(
-    (categoryId: string, s: Span) => {
+    (categoryId: string, s: Span, taskId?: string) => {
+      const t = taskId ? taskById.get(taskId) : undefined;
       const p = addPlanned({
         category_id: categoryId,
-        label: catName(categoryId),
+        plan: t ? [planItem(t)] : [],
         starts_at: atHour(monday, s.day, s.start).toISOString(),
         ends_at: atHour(monday, s.day, s.end).toISOString(),
       });
       setSel(p.id);
     },
-    [addPlanned, catName, monday],
+    [addPlanned, monday, taskById],
   );
+
+  const assign = useCallback(
+    (p: PlannedSession, taskId: string) => {
+      const t = taskById.get(taskId);
+      if (t && !p.plan.some((i) => i.task_id === t.id)) updatePlanned(p.id, { plan: [...p.plan, planItem(t)] });
+    },
+    [taskById, updatePlanned],
+  );
+  const unassign = (p: PlannedSession, taskId: string | null) => updatePlanned(p.id, { plan: p.plan.filter((i) => i.task_id !== taskId) });
 
   const onMove = useCallback(
     (ev: PointerEvent) => {
@@ -185,7 +229,8 @@ function Week() {
         if (!g.inside) return setGhost(null);
         const start = clampStart(snap(g.hour - d.hours / 2), d.hours);
         const span = { day: g.day, start, end: start + d.hours };
-        setGhost({ categoryId: d.categoryId, span, valid: !startsInPast(span) });
+        const into = d.taskId ? blocks.find((b) => !b.locked && b.day === g.day && b.start <= g.hour && g.hour < b.end) : undefined;
+        setGhost({ categoryId: d.categoryId, taskId: d.taskId, span, valid: Boolean(into) || !startsInPast(span), into: into?.p.id });
       } else if (d.mode === "move") {
         const dur = d.span.end - d.span.start;
         const start = clampStart(snap(g.hour - d.grab), dur);
@@ -197,7 +242,7 @@ function Week() {
     },
     // clampStart only reads dayStart/dayEnd
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [geom, dayEnd, dayStart, startsInPast],
+    [geom, dayEnd, dayStart, startsInPast, blocks],
   );
 
   const onUp = useCallback(() => {
@@ -209,11 +254,15 @@ function Week() {
       setTimeout(() => (justDragged.current = false), 0);
     }
     const dr = draftRef.current, gh = ghostRef.current;
-    if (d.mode === "new" && gh?.valid) create(gh.categoryId, gh.span);
+    const target = gh?.into ? planned.find((p) => p.id === gh.into) : undefined;
+    if (d.mode === "new" && target && gh?.taskId) {
+      assign(target, gh.taskId);
+      setSel(target.id);
+    } else if (d.mode === "new" && gh?.valid) create(gh.categoryId, gh.span, gh.taskId);
     if (d.mode !== "new" && dr && d.moved) commit(dr.id, dr.span);
     setDraft(null);
     setGhost(null);
-  }, [commit, create]);
+  }, [commit, create, assign, planned]);
 
   const follow = (d: Drag) => {
     dragRef.current = d;
@@ -235,7 +284,7 @@ function Week() {
     follow(d);
   };
 
-  // On touch a category only drags after a still press, so a swipe that starts on one scrolls the page.
+  // On touch a category or task only drags after a still press, so a swipe that starts on one scrolls the page.
   const [holding, setHolding] = useState<string | null>(null);
   const holdToDrag = (e: ReactPointerEvent, d: Drag & { mode: "new" }) => {
     const pid = e.pointerId;
@@ -252,7 +301,7 @@ function Week() {
       stop();
       // a press that turned into a drag isn't also a tap
       justDragged.current = true;
-      setHolding(d.categoryId);
+      setHolding(d.taskId ?? d.categoryId);
       follow(d);
     }, 350);
     window.addEventListener("pointermove", move);
@@ -262,7 +311,7 @@ function Week() {
 
   // Once a held drag is live, keep the finger from scrolling the page. Registered up front and non-passive,
   // since browsers only let a touchmove listener cancel scrolling if it was there when the touch began.
-  const paletteRef = useRef<HTMLDivElement>(null);
+  const paletteRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const el = paletteRef.current;
     if (!el) return;
@@ -288,10 +337,6 @@ function Week() {
     (exceptId?: string): Span[] => [...events, ...blocks.filter((b) => b.p.id !== exceptId && !b.missed)],
     [events, blocks],
   );
-  const overTitles = (s: Span, exceptId: string) => [
-    ...events.filter((e) => overlaps(s, e)).map((e) => e.title),
-    ...blocks.filter((b) => b.p.id !== exceptId && overlaps(s, b)).map((b) => `${b.label} block`),
-  ];
 
   const keyFor = (b: GridBlock) => (e: KeyboardEvent) => {
     if (b.locked) return;
@@ -336,14 +381,21 @@ function Week() {
   const totalPlaced = [...placed.values()].reduce((a, b) => a + b, 0);
   const totalGoal = activeCategories.reduce((a, c) => a + (c.weekly_goal_minutes ?? 0), 0);
 
-  const autoPlace = (categoryId: string) => {
+  const autoPlace = (categoryId: string, taskId?: string) => {
     if (justDragged.current || weekOver) return;
     const from = nowSlot ? { day: nowSlot.day, hour: nowSlot.hour } : { day: 0, hour: dayStart };
     const slot = firstFreeSlot(busy(), 1, dayStart, dayEnd, from);
-    if (slot) create(categoryId, slot);
+    if (slot) create(categoryId, slot, taskId);
   };
 
   const selected = blocks.find((b) => b.p.id === sel) ?? null;
+  const assignable = selected && !selected.locked ? selected : null;
+  // Pressing a task adds it to the selected timeblock; with none selected it drops an hour in the first free slot.
+  const pressTask = (t: Task) => {
+    if (justDragged.current) return;
+    if (assignable) assign(assignable.p, t.id);
+    else autoPlace(t.category_id, t.id);
+  };
   const selSpan = selected ? spanOf(selected) : null;
   const canStart = Boolean(selected && selected.p.status === "planned" && !live && nowMs >= Date.parse(selected.p.starts_at) - 15 * 6e4 && minutesLeft(selected.p, nowMs) >= 15);
 
@@ -383,13 +435,13 @@ function Week() {
       </div>
 
       <div className="week-wrap">
-        <aside className="week-side">
+        <aside className="week-side" ref={paletteRef}>
           <section>
             <h6>Timeblocks</h6>
             <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
               {weekOver ? "This week is over." : "Drag one onto the week, or press it to drop an hour in the first free slot."}
             </p>
-            <div className="palette" ref={paletteRef}>
+            <div className="palette">
               {activeCategories.map((c) => {
                 const got = placed.get(c.id) ?? 0;
                 const goal = c.weekly_goal_minutes ?? 0;
@@ -443,11 +495,29 @@ function Week() {
                 <span className="small">
                   {DAY_NAMES[selSpan.day]}, {hourRange(selSpan.start, selSpan.end)}
                 </span>
-                {overTitles(selSpan, selected.p.id).length > 0 && <span className="small" style={{ color: "var(--color-accent-700)" }}>Over {overTitles(selSpan, selected.p.id).join(", ")}</span>}
+                {selected.locked ? (
+                  selected.note && <span className="small">{selected.note}</span>
+                ) : (
+                  <BlockNote key={selected.p.id} value={selected.note} onSave={(label) => updatePlanned(selected.p.id, { label })} />
+                )}
+                {selected.p.plan.length > 0 && (
+                  <ul className="tb-tasks">
+                    {selected.p.plan.map((i) => (
+                      <li key={i.task_id ?? i.task_title}>
+                        <span>{i.task_title}</span>
+                        {!selected.locked && (
+                          <button className="btn btn-ghost" onClick={() => unassign(selected.p, i.task_id)} aria-label={`Remove ${i.task_title} from this timeblock`}>
+                            <X size={12} />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <span className="text-muted xsmall">
                   {selected.p.status === "started" && "Started."}
                   {selected.missed && "This block passed without a session."}
-                  {!selected.locked && "Drag to move, drag the bottom edge to resize. With the block focused: arrows move it, Shift+arrows resize, Delete removes."}
+                  {!selected.locked && "Press a task below to add it. Drag to move, drag the bottom edge to resize. With the block focused: arrows move it, Shift+arrows resize, Delete removes."}
                 </span>
                 <div className="btn-row" style={{ marginTop: "var(--space-1)" }}>
                   {selected.p.status === "planned" && !selected.missed && (
@@ -483,6 +553,53 @@ function Week() {
           </section>
 
           <section>
+            <h6>Tasks</h6>
+            <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
+              {assignable
+                ? "Press a task to add it to the selected timeblock, or drag it onto any timeblock."
+                : weekOver
+                  ? "This week is over."
+                  : "Drag a task onto a timeblock to add it, or onto an empty time to make a block for it."}
+            </p>
+            <div className="palette task-list">
+              {openTasks.map((t) => {
+                const inSel = Boolean(assignable?.p.plan.some((i) => i.task_id === t.id));
+                return (
+                  <button
+                    key={t.id}
+                    className={`palette-chip task-chip${holding === t.id ? " holding" : ""}${inSel ? " added" : ""}`}
+                    disabled={inSel || weekOver}
+                    onPointerDown={(e) => {
+                      const d = { mode: "new" as const, categoryId: t.category_id, taskId: t.id, hours: 1, x0: e.clientX, y0: e.clientY, moved: false };
+                      if (e.pointerType === "touch") holdToDrag(e, d);
+                      else startDrag(e, d);
+                    }}
+                    onClick={() => pressTask(t)}
+                    aria-label={`${t.title}, ${catName(t.category_id)}. ${assignable ? (inSel ? "In the selected timeblock." : "Press to add to the selected timeblock.") : "Drag onto the week, or press to add an hour in the first free slot."}`}
+                  >
+                    <span className="palette-top">
+                      <svg width="10" height="14" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+                        <circle cx="3" cy="3" r="1.4" /><circle cx="9" cy="3" r="1.4" /><circle cx="3" cy="8" r="1.4" /><circle cx="9" cy="8" r="1.4" /><circle cx="3" cy="13" r="1.4" /><circle cx="9" cy="13" r="1.4" />
+                      </svg>
+                      <span className="palette-name">{t.title}</span>
+                    </span>
+                    <span className="task-chip-meta">
+                      {catName(t.category_id)}
+                      {t.due_date && ` · ${dueLabel(t.due_date)}`}
+                      {inSel && " · added"}
+                    </span>
+                  </button>
+                );
+              })}
+              {!openTasks.length && (
+                <p className="text-muted small">
+                  No open tasks. Add some on the <Link href="/tasks">Tasks</Link> page.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section>
             <div className="section-head">
               <h6>Calendars</h6>
               {mode === "supabase" && cal.feeds.length > 0 && (
@@ -491,12 +608,25 @@ function Week() {
                 </button>
               )}
             </div>
+            {cal.feeds.length > 1 && (
+              <label className="cal-toggle cal-toggle-all">
+                <input
+                  type="checkbox"
+                  checked={!someHidden}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someHidden && !allHidden;
+                  }}
+                  onChange={() => setHidden(someHidden ? {} : Object.fromEntries(cal.feeds.map((f) => [f.id, true])))}
+                />
+                <span>All calendars</span>
+              </label>
+            )}
             {cal.feeds.map((f) => {
               const st = cal.status.find((s) => s.id === f.id);
               return (
                 <div key={f.id}>
                   <label className="cal-toggle">
-                    <input type="checkbox" checked={!hidden[f.id]} onChange={() => setHidden((h) => ({ ...h, [f.id]: !h[f.id] }))} style={{ accentColor: `var(--cal-${f.color}-sw)` }} />
+                    <input type="checkbox" checked={!hidden[f.id]} onChange={() => setHidden({ ...hidden, [f.id]: !hidden[f.id] })} style={{ accentColor: `var(--cal-${f.color}-sw)` }} />
                     <span className="cal-swatch" style={{ background: `var(--cal-${f.color}-bg)`, boxShadow: `inset 0 0 0 1.5px var(--cal-${f.color}-sw)` }} />
                     <span>{f.name}</span>
                   </label>
@@ -577,16 +707,16 @@ function Week() {
                         .map((b) => {
                           const s = spanOf(b);
                           const hpx = (s.end - s.start) * HOUR_PX;
-                          const over = overTitles(s, b.p.id);
                           const isSel = sel === b.p.id;
                           const dragging = draft?.id === b.p.id;
-                          const cls = ["tb", isSel && "selected", dragging && "dragging", dragging && startsInPast(s) && "invalid", b.locked && "locked", b.missed && "missed"].filter(Boolean).join(" ");
+                          const target = ghost?.into === b.p.id;
+                          const cls = ["tb", isSel && "selected", dragging && "dragging", dragging && startsInPast(s) && "invalid", b.locked && "locked", b.missed && "missed", target && "drop-target"].filter(Boolean).join(" ");
                           return (
                             <div key={b.p.id} className={cls} style={{ top: (s.start - dayStart) * HOUR_PX, height: hpx }}>
                               <button
                                 className="tb-hit"
                                 data-block={b.p.id}
-                                aria-label={`${b.label} timeblock, ${DAY_NAMES[s.day]} ${hourRange(s.start, s.end)}${over.length ? `, over ${over.join(", ")}` : ""}.${b.locked ? "" : " Arrow keys move, Shift and arrows resize, Delete removes."}`}
+                                aria-label={`${b.label} timeblock${b.note ? `: ${b.note}` : ""}, ${DAY_NAMES[s.day]} ${hourRange(s.start, s.end)}${b.tasks.length ? `. Tasks: ${b.tasks.join(", ")}` : ""}.${b.locked ? "" : " Arrow keys move, Shift and arrows resize, Delete removes."}`}
                                 onPointerDown={(e) => {
                                   setSel(b.p.id);
                                   if (b.locked) return;
@@ -598,10 +728,10 @@ function Week() {
                               />
                               <div className="tb-label">
                                 <b>
-                                  {b.label} · {hm((s.end - s.start) * 60)}
+                                  {b.note || b.label} · {hm((s.end - s.start) * 60)}
                                 </b>
-                                {hpx >= 50 && <div>{hourRange(s.start, s.end)}</div>}
-                                {hpx >= 66 && over.length > 0 && <div className="over">over {over.join(", ")}</div>}
+                                {hpx >= 50 && <div>{b.note ? `${b.label} · ${hourRange(s.start, s.end)}` : hourRange(s.start, s.end)}</div>}
+                                {hpx >= 66 && b.tasks.length > 0 && <div className="tasks">{b.tasks.join(", ")}</div>}
                                 {hpx >= 50 && b.locked && <div>{b.missed ? "Missed" : "Started"}</div>}
                               </div>
                               {isSel && !b.locked && !dragging && (
@@ -626,11 +756,11 @@ function Week() {
                             </div>
                           );
                         })}
-                      {ghost?.span.day === d && (
+                      {ghost?.span.day === d && !ghost.into && (
                         <div className={`tb ghost${ghost.valid ? "" : " invalid"}`} style={{ top: (ghost.span.start - dayStart) * HOUR_PX, height: (ghost.span.end - ghost.span.start) * HOUR_PX }}>
                           <div className="tb-label">
                             <b>
-                              {catName(ghost.categoryId)} · {hm((ghost.span.end - ghost.span.start) * 60)}
+                              {(ghost.taskId && taskById.get(ghost.taskId)?.title) || catName(ghost.categoryId)} · {hm((ghost.span.end - ghost.span.start) * 60)}
                             </b>
                             <div>{ghost.valid ? hourRange(ghost.span.start, ghost.span.end) : "That time has passed"}</div>
                           </div>
@@ -648,6 +778,35 @@ function Week() {
         </section>
       </div>
     </>
+  );
+}
+
+/**
+ * "What you'll do" on the selected timeblock. Saves on blur or Enter, not on every keystroke, and on unmount:
+ * pressing another timeblock swaps this out without a blur (its pointerdown is preventDefault'ed).
+ */
+function BlockNote({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  const save = () => v.trim() !== value && onSave(v.trim());
+  const latest = useRef(save);
+  useEffect(() => {
+    latest.current = save;
+  });
+  useEffect(() => () => void latest.current(), []);
+  return (
+    <div className="field">
+      <label htmlFor="tb-note">What you&apos;ll do</label>
+      <input
+        id="tb-note"
+        className="input"
+        value={v}
+        maxLength={120}
+        placeholder="e.g. Finish problem set 4"
+        onChange={(e) => setV(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      />
+    </div>
   );
 }
 
