@@ -511,6 +511,7 @@ body:has(.ov-shell) { background: transparent; min-height: 0; }
 .week-scroll { overflow-x: auto; border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-neutral-100); }
 .week-inner { min-width: 780px; }
 .week-days { display: flex; border-bottom: 1px solid var(--color-divider); }
+.week-time-scroll { height: min(680px, 72vh); min-height: 420px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .week-gutter { width: 48px; flex: none; position: relative; }
 .week-day-head { flex: 1 1 0; min-width: 0; padding: var(--space-2) var(--space-2) 6px; border-left: 1px solid var(--color-divider); }
 .week-day-head.today { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }

@@ -13,8 +13,10 @@ import { useCalendar } from "@/lib/useCalendar";
 import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
 import { addDays, atHour, firstFreeSlot, hm, hourLabel, hourRange, snap, toSlot, weekFromParam, weekParam, type Span } from "@/lib/week";
 
-const HOUR_PX = 40;
+const HOUR_PX = 56;
 const GUTTER = 48;
+const GRID_DAY_START = 0;
+const GRID_DAY_END = 24;
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -66,7 +68,10 @@ function Week() {
 
   const dayStart = Math.floor(timeToHours(daySettings.day_start));
   const dayEnd = Math.max(dayStart + 1, Math.min(24, Math.ceil(timeToHours(daySettings.wind_down))));
-  const gridH = (dayEnd - dayStart) * HOUR_PX;
+  const gridH = (GRID_DAY_END - GRID_DAY_START) * HOUR_PX;
+  const thisWeek = monday.getTime() <= nowMs && nowMs < sunday.getTime();
+  const nowSlot = thisWeek ? toSlot(monday, now) : null;
+  const weekOver = sunday.getTime() <= nowMs;
 
   useGoogleCalendar(); // picks up calendars added to the Google account since the last visit
   const cal = useCalendar(mode, daySettings.calendars, monday, sunday);
@@ -107,13 +112,13 @@ function Week() {
       const s = new Date(e.start), en = new Date(e.end);
       const a = toSlot(monday, s), b = toSlot(monday, en);
       for (let d = Math.max(0, a.day); d <= Math.min(6, b.day); d++) {
-        const start = Math.max(dayStart, d === a.day ? a.hour : 0);
-        const end = Math.min(dayEnd, d === b.day ? b.hour : 24);
+        const start = Math.max(GRID_DAY_START, d === a.day ? a.hour : 0);
+        const end = Math.min(GRID_DAY_END, d === b.day ? b.hour : 24);
         if (end > start) events.push({ id: e.id + ":" + d, day: d, start, end, title: e.title, color });
       }
     }
     return { events, allDay };
-  }, [cal.events, hidden, colorOf, monday, dayStart, dayEnd]);
+  }, [cal.events, hidden, colorOf, monday]);
 
   const weekPlanned = useMemo(
     () => planned.filter((p) => p.category_id && Date.parse(p.starts_at) < sunday.getTime() && Date.parse(p.ends_at) > monday.getTime()),
@@ -135,7 +140,8 @@ function Week() {
           label,
           note: p.label === label ? "" : p.label, // blocks made before notes existed carry the category name
           tasks: p.plan.map((i) => i.task_title),
-          locked: p.status !== "planned" || ended,
+          // Planned blocks stay editable after they pass so a forgotten block can be backfilled.
+          locked: p.status !== "planned",
           missed: p.status === "missed" || (p.status === "planned" && ended),
         };
       }),
@@ -160,14 +166,15 @@ function Week() {
   const dragRef = useRef<Drag | null>(null);
   const justDragged = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const timeScrollRef = useRef<HTMLDivElement>(null);
+  const initialScrollWeek = useRef<string | null>(null);
   useEffect(() => {
     draftRef.current = draft;
     ghostRef.current = ghost;
   }, [draft, ghost]);
 
   const spanOf = (b: GridBlock): Span => (draft && draft.id === b.p.id ? draft.span : b);
-  const startsInPast = useCallback((s: Span) => atHour(monday, s.day, s.start).getTime() < nowMs, [monday, nowMs]);
-  const clampStart = (s: number, dur: number) => Math.max(dayStart, Math.min(dayEnd - dur, s));
+  const clampStart = (s: number, dur: number) => Math.max(GRID_DAY_START, Math.min(GRID_DAY_END - dur, s));
 
   const geom = useCallback(
     (x: number, y: number) => {
@@ -180,18 +187,17 @@ function Week() {
       return {
         inside: gx >= 0 && gx <= r.width - GUTTER * scale && y >= r.top && y <= r.bottom,
         day: Math.max(0, Math.min(6, Math.floor(gx / colW))),
-        hour: dayStart + ((y - r.top) / r.height) * (dayEnd - dayStart),
+        hour: GRID_DAY_START + ((y - r.top) / r.height) * (GRID_DAY_END - GRID_DAY_START),
       };
     },
-    [dayStart, dayEnd],
+    [],
   );
 
   const commit = useCallback(
     (id: string, s: Span) => {
-      if (startsInPast(s)) return;
       updatePlanned(id, { starts_at: atHour(monday, s.day, s.start).toISOString(), ends_at: atHour(monday, s.day, s.end).toISOString() });
     },
-    [monday, startsInPast, updatePlanned],
+    [monday, updatePlanned],
   );
 
   const create = useCallback(
@@ -230,19 +236,18 @@ function Week() {
         const start = clampStart(snap(g.hour - d.hours / 2), d.hours);
         const span = { day: g.day, start, end: start + d.hours };
         const into = d.taskId ? blocks.find((b) => !b.locked && b.day === g.day && b.start <= g.hour && g.hour < b.end) : undefined;
-        setGhost({ categoryId: d.categoryId, taskId: d.taskId, span, valid: Boolean(into) || !startsInPast(span), into: into?.p.id });
+        setGhost({ categoryId: d.categoryId, taskId: d.taskId, span, valid: true, into: into?.p.id });
       } else if (d.mode === "move") {
         const dur = d.span.end - d.span.start;
         const start = clampStart(snap(g.hour - d.grab), dur);
         setDraft({ id: d.id, span: { day: g.day, start, end: start + dur } });
       } else {
-        const end = Math.min(dayEnd, Math.max(d.span.start + 0.5, snap(g.hour)));
+        const end = Math.min(GRID_DAY_END, Math.max(d.span.start + 0.5, snap(g.hour)));
         setDraft({ id: d.id, span: { ...d.span, end } });
       }
     },
-    // clampStart only reads dayStart/dayEnd
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [geom, dayEnd, dayStart, startsInPast, blocks],
+    // clampStart uses the fixed, full-day grid bounds.
+    [geom, blocks],
   );
 
   const onUp = useCallback(() => {
@@ -343,7 +348,7 @@ function Week() {
     const dur = b.end - b.start;
     let s: Span | null = null;
     if (e.key === "ArrowUp") s = e.shiftKey ? { ...b, end: Math.max(b.start + 0.5, b.end - 0.25) } : { day: b.day, start: clampStart(b.start - 0.25, dur), end: clampStart(b.start - 0.25, dur) + dur };
-    else if (e.key === "ArrowDown") s = e.shiftKey ? { ...b, end: Math.min(dayEnd, b.end + 0.25) } : { day: b.day, start: clampStart(b.start + 0.25, dur), end: clampStart(b.start + 0.25, dur) + dur };
+    else if (e.key === "ArrowDown") s = e.shiftKey ? { ...b, end: Math.min(GRID_DAY_END, b.end + 0.25) } : { day: b.day, start: clampStart(b.start + 0.25, dur), end: clampStart(b.start + 0.25, dur) + dur };
     else if (e.key === "ArrowLeft") s = { ...b, day: Math.max(0, b.day - 1) };
     else if (e.key === "ArrowRight") s = { ...b, day: Math.min(6, b.day + 1) };
     else if (e.key === "Delete" || e.key === "Backspace") {
@@ -369,9 +374,19 @@ function Week() {
 
   // ---------- derived for the sidebar ----------
 
-  const thisWeek = monday.getTime() <= nowMs && nowMs < sunday.getTime();
-  const nowSlot = thisWeek ? toSlot(monday, now) : null;
-  const weekOver = sunday.getTime() <= nowMs;
+  // Start each week near the present moment (or the user's usual day start for another week),
+  // while leaving the full day available by scrolling in either direction.
+  useEffect(() => {
+    if (!ready || initialScrollWeek.current === weekParam(monday)) return;
+    const frame = requestAnimationFrame(() => {
+      const el = timeScrollRef.current;
+      if (!el || initialScrollWeek.current === weekParam(monday)) return;
+      const focusHour = nowSlot?.hour ?? dayStart;
+      el.scrollTop = Math.max(0, (focusHour - GRID_DAY_START - 1.5) * HOUR_PX);
+      initialScrollWeek.current = weekParam(monday);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready, monday, nowSlot?.hour, dayStart]);
 
   const placed = useMemo(() => {
     const m = new Map<string, number>();
@@ -382,7 +397,7 @@ function Week() {
   const totalGoal = activeCategories.reduce((a, c) => a + (c.weekly_goal_minutes ?? 0), 0);
 
   const autoPlace = (categoryId: string, taskId?: string) => {
-    if (justDragged.current || weekOver) return;
+    if (justDragged.current) return;
     const from = nowSlot ? { day: nowSlot.day, hour: nowSlot.hour } : { day: 0, hour: dayStart };
     const slot = firstFreeSlot(busy(), 1, dayStart, dayEnd, from);
     if (slot) create(categoryId, slot, taskId);
@@ -439,7 +454,7 @@ function Week() {
           <section>
             <h6>Timeblocks</h6>
             <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
-              {weekOver ? "This week is over." : "Drag one onto the week, or press it to drop an hour in the first free slot."}
+              Drag one onto the week, including an earlier slot to backfill it, or press it to drop an hour in the first free slot.
             </p>
             <div className="palette">
               {activeCategories.map((c) => {
@@ -450,7 +465,6 @@ function Week() {
                   <button
                     key={c.id}
                     className={`palette-chip${holding === c.id ? " holding" : ""}`}
-                    disabled={weekOver}
                     onPointerDown={(e) => {
                       const d = { mode: "new" as const, categoryId: c.id, hours: 1, x0: e.clientX, y0: e.clientY, moved: false };
                       if (e.pointerType === "touch") holdToDrag(e, d);
@@ -557,9 +571,7 @@ function Week() {
             <p className="text-muted xsmall" style={{ marginBottom: "var(--space-2)" }}>
               {assignable
                 ? "Press a task to add it to the selected timeblock, or drag it onto any timeblock."
-                : weekOver
-                  ? "This week is over."
-                  : "Drag a task onto a timeblock to add it, or onto an empty time to make a block for it."}
+                : "Drag a task onto a timeblock to add it, or onto an empty time to make a block for it."}
             </p>
             <div className="palette task-list">
               {openTasks.map((t) => {
@@ -568,7 +580,7 @@ function Week() {
                   <button
                     key={t.id}
                     className={`palette-chip task-chip${holding === t.id ? " holding" : ""}${inSel ? " added" : ""}`}
-                    disabled={inSel || weekOver}
+                    disabled={inSel}
                     onPointerDown={(e) => {
                       const d = { mode: "new" as const, categoryId: t.category_id, taskId: t.id, hours: 1, x0: e.clientX, y0: e.clientY, moved: false };
                       if (e.pointerType === "touch") holdToDrag(e, d);
@@ -674,19 +686,20 @@ function Week() {
                   );
                 })}
               </div>
+              <div className="week-time-scroll" ref={timeScrollRef}>
               <div className="week-body" ref={gridRef} style={{ height: gridH }}>
                 <div className="week-gutter">
-                  {Array.from({ length: dayEnd - dayStart }, (_, i) => (
+                  {Array.from({ length: GRID_DAY_END - GRID_DAY_START }, (_, i) => (
                     <span key={i} className="week-hour" style={{ top: i * HOUR_PX }}>
-                      {hourLabel(dayStart + i)}
+                      {hourLabel(GRID_DAY_START + i)}
                     </span>
                   ))}
                 </div>
                 {SHORT.map((_, d) => {
-                  const pastH = !nowSlot ? (weekOver ? gridH : 0) : d < nowSlot.day ? gridH : d === nowSlot.day ? Math.max(0, Math.min(gridH, (nowSlot.hour - dayStart) * HOUR_PX)) : 0;
+                  const pastH = !nowSlot ? (weekOver ? gridH : 0) : d < nowSlot.day ? gridH : d === nowSlot.day ? Math.max(0, Math.min(gridH, (nowSlot.hour - GRID_DAY_START) * HOUR_PX)) : 0;
                   return (
                     <div key={d} className={`week-col${nowSlot?.day === d ? " today" : ""}`}>
-                      {Array.from({ length: dayEnd - dayStart - 1 }, (_, i) => (
+                      {Array.from({ length: GRID_DAY_END - GRID_DAY_START - 1 }, (_, i) => (
                         <div key={i} className="week-line" style={{ top: (i + 1) * HOUR_PX }} />
                       ))}
                       {events
@@ -694,7 +707,7 @@ function Week() {
                         .map((e) => {
                           const h = (e.end - e.start) * HOUR_PX;
                           return (
-                            <div key={e.id} className="cal-ev" style={{ ...calVars(e.color), top: (e.start - dayStart) * HOUR_PX + 1, height: h - 2 }} title={`${e.title} · ${hourRange(e.start, e.end)}`}>
+                            <div key={e.id} className="cal-ev" style={{ ...calVars(e.color), top: (e.start - GRID_DAY_START) * HOUR_PX + 1, height: h - 2 }} title={`${e.title} · ${hourRange(e.start, e.end)}`}>
                               <b>{e.title}</b>
                               {h >= 44 && hourRange(e.start, e.end)}
                             </div>
@@ -710,9 +723,9 @@ function Week() {
                           const isSel = sel === b.p.id;
                           const dragging = draft?.id === b.p.id;
                           const target = ghost?.into === b.p.id;
-                          const cls = ["tb", isSel && "selected", dragging && "dragging", dragging && startsInPast(s) && "invalid", b.locked && "locked", b.missed && "missed", target && "drop-target"].filter(Boolean).join(" ");
+                          const cls = ["tb", isSel && "selected", dragging && "dragging", b.locked && "locked", b.missed && "missed", target && "drop-target"].filter(Boolean).join(" ");
                           return (
-                            <div key={b.p.id} className={cls} style={{ top: (s.start - dayStart) * HOUR_PX, height: hpx }}>
+                            <div key={b.p.id} className={cls} style={{ top: (s.start - GRID_DAY_START) * HOUR_PX, height: hpx }}>
                               <button
                                 className="tb-hit"
                                 data-block={b.p.id}
@@ -757,18 +770,19 @@ function Week() {
                           );
                         })}
                       {ghost?.span.day === d && !ghost.into && (
-                        <div className={`tb ghost${ghost.valid ? "" : " invalid"}`} style={{ top: (ghost.span.start - dayStart) * HOUR_PX, height: (ghost.span.end - ghost.span.start) * HOUR_PX }}>
+                        <div className="tb ghost" style={{ top: (ghost.span.start - GRID_DAY_START) * HOUR_PX, height: (ghost.span.end - ghost.span.start) * HOUR_PX }}>
                           <div className="tb-label">
                             <b>
                               {(ghost.taskId && taskById.get(ghost.taskId)?.title) || catName(ghost.categoryId)} · {hm((ghost.span.end - ghost.span.start) * 60)}
                             </b>
-                            <div>{ghost.valid ? hourRange(ghost.span.start, ghost.span.end) : "That time has passed"}</div>
+                            <div>{hourRange(ghost.span.start, ghost.span.end)}</div>
                           </div>
                         </div>
                       )}
                     </div>
                   );
                 })}
+              </div>
               </div>
             </div>
           </div>

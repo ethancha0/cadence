@@ -227,7 +227,7 @@ export function CalendarSettings() {
 
       <section>
         <h6>Your day</h6>
-        <p className="text-muted small">The Week page shows these hours.</p>
+        <p className="text-muted small">Used for automatic timeblocks and your wind-down reminder. The Week page always shows a scrollable full day.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-4)" }}>
           <div className="field">
             <label htmlFor="day-start">Day starts</label>
